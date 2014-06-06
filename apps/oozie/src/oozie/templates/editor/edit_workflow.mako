@@ -41,10 +41,10 @@ ${ layout.menubar(section='workflows') }
       <ul class="nav nav-list">
         <li class="nav-header">${ _('Editor') }</li>
         <li><a href="#editWorkflow"><i class="fa fa-code-fork"></i> ${ _('Workflow') }</a></li>
-        <li><a href="#properties"><i class="fa fa-reorder"></i> ${ _('Properties') }</a></li>
+        <li><a href="#properties"><i class="fa fa-cog"></i> ${ _('Properties') }</a></li>
         % if user_can_edit_job:
           <li>
-            <a data-bind="attr: {href: '/filebrowser/view' + deployment_dir() }" target="_blank" title="${ _('Go upload additional files and libraries to the deployment directory on HDFS') }" rel="tooltip" data-placement="right"><i class="fa fa-folder-open"></i> ${ _('Workspace') }</a>
+            <a data-bind="attr: {href: '/filebrowser/view' + fixLeadingSlash(deployment_dir()) }" target="_blank" title="${ _('Go upload additional files and libraries to the deployment directory on HDFS') }" rel="tooltip" data-placement="right"><i class="fa fa-folder-open"></i> ${ _('Workspace') }</a>
           </li>
         % endif
 
@@ -85,12 +85,12 @@ ${ layout.menubar(section='workflows') }
       <div class="alert alert-info"><h3 data-bind="text: name()"></h3></div>
       <div class="card-body">
         <p>
-            <fieldset>
-        ${ utils.render_field_with_error_js(workflow_form['name'], workflow_form['name'].name, extra_attrs={'data-bind': 'value: %s' % workflow_form['name'].name}) }
-        ${ utils.render_field_with_error_js(workflow_form['description'], workflow_form['description'].name, extra_attrs={'data-bind': 'value: %s' % workflow_form['description'].name}) }
-        <div class="hide">
-          ${ utils.render_field_with_error_js(workflow_form['is_shared'], workflow_form['is_shared'].name, extra_attrs={'data-bind': 'checked: %s' % workflow_form['is_shared'].name}) }
-        </div>
+          <fieldset>
+            ${ utils.render_field_with_error_js(workflow_form['name'], workflow_form['name'].name, extra_attrs={'data-bind': 'value: %s' % workflow_form['name'].name}) }
+            ${ utils.render_field_with_error_js(workflow_form['description'], workflow_form['description'].name, extra_attrs={'data-bind': 'value: %s' % workflow_form['description'].name}) }
+            <div class="hide">
+              ${ utils.render_field_with_error_js(workflow_form['is_shared'], workflow_form['is_shared'].name, extra_attrs={'data-bind': 'checked: %s' % workflow_form['is_shared'].name}) }
+            </div>
 
       <%
       workflows.key_value_field(workflow_form['parameters'].label, workflow_form['parameters'].help_text, {
@@ -369,10 +369,13 @@ ${ layout.menubar(section='workflows') }
                 % for record in history:
                 <tr>
                   <td>
-                    <a href="${ url('oozie:list_history_record', record_id=record.id) }" data-row-selector="true"></a>
                     ${ utils.format_date(record.submission_date) }
                   </td>
-                  <td>${ record.oozie_job_id }</td>
+                  <td>
+                    <a href="${ record.get_absolute_oozie_url() }" data-row-selector="true">
+                      ${ record.oozie_job_id }
+                    </a>
+                  </td>
                 </tr>
                 % endfor
                 </tbody>
@@ -389,7 +392,7 @@ ${ layout.menubar(section='workflows') }
 
   <div id="formActions" class="form-actions center">
   % if user_can_edit_job:
-    <button data-bind="disable: workflow.read_only, visible: !workflow.read_only(), click: save_workflow" class="btn btn-primary" id="btn-save-wf">${ _('Save') }</button>
+    <button data-bind="disable: workflow.read_only, visible: !workflow.read_only()" class="btn btn-primary" id="btn-save-wf">${ _('Save') }</button>
   % endif
     <a href="${ url('oozie:list_workflows') }" class="btn">${ _('Back') }</a>
   </div>
@@ -411,6 +414,22 @@ ${ layout.menubar(section='workflows') }
   </div>
 </div>
 
+<div id="runUnsaved" class="modal hide fade">
+  <div class="modal-header">
+    <a href="#" class="close" data-dismiss="modal">&times;</a>
+    <h3>${_('The workflow has some unsaved changes')}</h3>
+  </div>
+  <div class="modal-body">
+    <p>
+      ${_('Please save or undo your changes before submitting it.')}
+    </p>
+  </div>
+  <div class="modal-footer">
+    <a href="#" class="btn" data-dismiss="modal">${_('Cancel')}</a>
+    <a id="saveAndSubmitBtn" class="btn btn-primary" href="javascript:void(0);">${_('Save and submit')}</a>
+  </div>
+</div>
+
 
 <div id="modal-window" class="modal hide fade"></div>
 
@@ -424,7 +443,7 @@ ${ layout.menubar(section='workflows') }
 
 <script src="/static/ext/js/knockout-min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/knockout.mapping-2.3.2.js" type="text/javascript" charset="utf-8"></script>
-<script src="/static/ext/js/jquery/plugins/jquery-ui-draggable-droppable-sortable-1.8.23.min.js" type="text/javascript" charset="utf-8"></script>
+<script src="/static/ext/js/jquery/plugins/jquery-ui-1.10.4.draggable-droppable-sortable.min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/routie-0.3.0.min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/datatables-paging-0.1.js" type="text/javascript" charset="utf-8"></script>
 
@@ -585,11 +604,21 @@ ${ controls.decision_form(node_form, link_form, default_link_form, 'decision', T
  * Initialize the workflow, registry, modal, and import objects.
  */
  // Custom handlers for saving, loading, error checking, etc.
+function interpret_server_error(data, premessage) {
+  var message = premessage;
+  if (data) {
+    if (data.message) {
+      message += ": " + data.message;
+    }
+  }
+  return message;
+}
+
 function import_jobsub_load_success(data) {
   if (data.status == 0) {
     import_jobsub_action.initialize(data.data);
   } else {
-    $(document).trigger("error", "${ _('Received invalid response from server: ') } " + JSON.stringify(data));
+    $(document).trigger("error", interpret_server_error(data, "${ _('Received invalid response from server') } "));
   }
 }
 
@@ -597,29 +626,30 @@ function import_workflow_load_success(data) {
   if (data.status == 0) {
     import_workflow_action.initialize(data.data);
   } else {
-    $(document).trigger("error", "${ _('Received invalid response from server: ') } " + JSON.stringify(data));
+    $(document).trigger("error", interpret_server_error(data, "${ _('Received invalid response from server') } "));
   }
 }
 
 function workflow_save_success(data) {
-  $(document).trigger("info", "${ _('Workflow saved') }");
-  workflow.reload(data.data);
-  workflow.is_dirty( false );
-  workflow.loading(false);
-  $("#btn-save-wf").button('reset');
+  if (data.status != 0) {
+    $(document).trigger("error", interpret_server_error(data, "${ _('Could not save workflow') }"));
+  } else {
+    $(document).trigger("info", "${ _('Workflow saved') }");
+    workflow.reload(data.data);
+    workflow.is_dirty( false );
+    workflow.loading( false );
+    $("#btn-save-wf").button('reset');
+  }
 }
 
-function workflow_save_error(data) {
-  try {
-    if (data.status !== 400) {
-      throw Exception();
-    }
-    var response = $.parseJSON(data.responseText);
-    ko.mapping.fromJS(response.data.errors, workflow.errors);
-  } catch(err) {}
-  $(document).trigger("error", "${ _('Could not save workflow') }");
-  workflow.loading(false);
-  $("#btn-save-wf").button('reset');
+function workflow_save_error(jqXHR) {
+  if (jqXHR.status !== 400) {
+    $(document).trigger("error", interpret_server_error(jqXHR.responseJSON, "${ _('Could not save workflow') }"));
+  } else {
+    ko.mapping.fromJS(jqXHR.responseJSON.details.errors, workflow.errors);
+    workflow.loading(false);
+    $("#btn-save-wf").button('reset');
+  }
 }
 
 function workflow_read_only_handler() {
@@ -638,19 +668,29 @@ function workflow_load_success(data) {
     ko.applyBindings(kill_view_model, $('#editKill')[0]);
 
   } else {
-    $(document).trigger("error", "${ _('Received invalid response from server: ') }" + JSON.stringify(data));
+    $(document).trigger("error", interpret_server_error(data, "${ _('Error loading workflow') }"));
   }
   workflow.loading(false);
 }
 
-function save_workflow() {
+function workflow_load_error(jqXHR) {
+  var data = jqXHR.responseJSON;
+  $(document).trigger("error", interpret_server_error(jqXHR.responseJSON, "${ _('Error loading workflow') }"));
+  workflow.loading(false);
+}
+
+function save_workflow(callback) {
+  var _callbackFn = workflow_save_success;
+  if (typeof callback != "undefined"){
+    _callbackFn = callback;
+  }
   workflow.loading(true);
   if (kill_view_model.enabled()) {
     if (kill_view_model.isValid()) {
-      workflow.save({ success: workflow_save_success, error: workflow_save_error });
+      workflow.save({ success: _callbackFn, error: workflow_save_error });
     }
   } else {
-    workflow.save({ success: workflow_save_success, error: workflow_save_error });
+    workflow.save({ success: _callbackFn, error: workflow_save_error });
   }
 }
 
@@ -695,7 +735,7 @@ import_workflow_action.fetchWorkflows({ success: import_workflow_load_success })
     }
   });
   workflow.loading(true);
-  workflow.load({ success: workflow_load_success });
+  workflow.load({ success: workflow_load_success, error: workflow_load_error });
 }
 
 /**
@@ -861,7 +901,7 @@ $('#importJobsub').on('click', '.action-row', function(e) {
           routie('editWorkflow');
           $(document).trigger("info", "${ _('Action imported at the top of the workflow.') } ");
         } else {
-          $(document).trigger("error", "${ _('Received invalid response from server: ') } " + JSON.stringify(data));
+          $(document).trigger("error", interpret_server_error(data, "${ _('Received invalid response from server') }"));
         }
       }
     });
@@ -883,7 +923,7 @@ $('#importOozie').on('click', '.action-row', function(e) {
           import_view_model.oozie().initialize({nodes: data.data.actions});
           routie('importAction/oozie');
         } else {
-          $(document).trigger("error", "${ _('Received invalid response from server: ') } " + JSON.stringify(data));
+          $(document).trigger("error", interpret_server_error(data, "${ _('Received invalid response from server') }"));
         }
       }
     });
@@ -900,7 +940,7 @@ $('#importOozieAction').on('click', '.action-row', function(e) {
 
     workflow.el.trigger('workflow:rebuild');
     routie('editWorkflow');
-    $(document).trigger("error", "${ _('Action imported at the top of the workflow.') } ");
+    $(document).trigger("info", "${ _('Action imported at the top of the workflow.') }");
   }
 });
 
@@ -942,11 +982,20 @@ window.onresize = function () {
   }
 };
 
+function fixLeadingSlash(path) {
+  if (path[0] != "/") {
+    return "/" + path;
+  }
+  return path;
+}
+
 var AUTOCOMPLETE_PROPERTIES;
 
 $(document).ready(function () {
 
   routie('editWorkflow');
+
+  $("a[data-row-selector='true']").jHueRowSelector();
 
   var actionToolbarProperties = {
     docked: false,
@@ -982,16 +1031,43 @@ $(document).ready(function () {
     var _url = $(this).data('clone-url');
     $.post(_url, function (data) {
       window.location = data.url;
+    }).error(function(){
+      $(document).trigger("error", "${ _('There was a problem copying this workflow.') }");
     });
   });
+
   $('#submit-btn').on('click', function () {
-    var _url = $(this).data('submit-url');
-    $.get(_url, function (response) {
+    if (workflow.is_dirty()) {
+      $("#runUnsaved").modal();
+      $("#runUnsaved").data("submit-url", $(this).data('submit-url'));
+    }
+    else {
+      submitWorkflow($(this).data('submit-url'));
+    }
+  });
+
+  $("#saveAndSubmitBtn").on("click", function () {
+    $("#runUnsaved").modal("hide");
+    save_workflow(function (data) {
+      workflow_save_success(data);
+      submitWorkflow($("#runUnsaved").data('submit-url'));
+    });
+  });
+
+  $('#btn-save-wf').on("click", function() {
+    save_workflow();
+    return false;
+  });
+
+  function submitWorkflow(url) {
+    $.get(url, function (response) {
         $('#submit-wf-modal').html(response);
         $('#submit-wf-modal').modal('show');
       }
-    );
-  });
+    ).error(function(){
+      $(document).trigger("error", "${ _('There was a problem submitting this workflow.') }");
+    });
+  }
 
   routie({
     'properties':function () {

@@ -15,7 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
 import base64
 import datetime
 import logging
@@ -128,6 +127,13 @@ class QueryHistory(models.Model):
     else:
       return self.query
 
+  def refresh_design(self, hql_query):
+    # Refresh only HQL query part
+    query = self.design.get_design()
+    query.hql_query = hql_query
+    self.design.data = query.dumps()
+    self.query = hql_query
+ 
   def is_finished(self):
     is_statement_finished = not self.is_running()
 
@@ -145,6 +151,9 @@ class QueryHistory(models.Model):
 
   def is_failure(self):
     return self.last_state in (QueryHistory.STATE.expired.index, QueryHistory.STATE.failed.index)
+
+  def is_expired(self):
+    return self.last_state in (QueryHistory.STATE.expired.index,)
 
   def set_to_running(self):
     self.last_state = QueryHistory.STATE.running.index
@@ -242,13 +251,14 @@ class SavedQuery(models.Model):
       # data is empty
       pass
 
-  def clone(self):
-    """clone() -> A new SavedQuery with a deep copy of the same data"""
-    design = SavedQuery(type=self.type, owner=self.owner)
-    design.data = copy.deepcopy(self.data)
-    design.name = copy.deepcopy(self.name)
-    design.desc = copy.deepcopy(self.desc)
-    design.is_auto = copy.deepcopy(self.is_auto)
+  def clone(self, new_owner=None):
+    if new_owner is None:
+      new_owner = self.owner
+    design = SavedQuery(type=self.type, owner=new_owner)
+    design.data = self.data
+    design.name = self.name
+    design.desc = self.desc
+    design.is_auto = self.is_auto
     return design
 
   @classmethod
@@ -260,6 +270,10 @@ class SavedQuery(models.Model):
     design.data = data
     design.is_auto = True
     design.save()
+
+    Document.objects.link(design, owner=design.owner, extra=design.type, name=design.name, description=design.desc)
+    design.doc.get().add_to_history()    
+    
     return design
 
   @staticmethod

@@ -38,6 +38,7 @@ ${ components.menubar() }
     </%def>
 
     <%def name="creation()">
+      % if not is_yarn:
       <label class="checkbox retired">
         <%
             checked = ""
@@ -46,6 +47,7 @@ ${ components.menubar() }
         %>
         <input id="showRetired" type="checkbox" ${checked}> ${_('Show retired jobs')}
       </label>
+      % endif
       <span class="btn-group">
         <a class="btn btn-status btn-success" data-value="completed">${ _('Succeeded') }</a>
         <a class="btn btn-status btn-warning" data-value="running">${ _('Running') }</a>
@@ -180,7 +182,7 @@ ${ components.menubar() }
         // Update updateableRows.
         for(var i = 0; i < data.length; ++i) {
           var job = data[i];
-          if (['RUNNING', 'PREP', 'WAITING', 'SUSPENDED', 'PREPSUSPENDED', 'PREPPAUSED', 'PAUSED', 'STARTED', 'FINISHING'].indexOf(job.status.toUpperCase()) > -1) {
+          if (Utils.RUNNING_ARRAY.indexOf(job.status.toUpperCase()) > -1) {
             updateableRows[job.shortId] = job;
 
             var nNodes = jobTable.fnGetNodes();
@@ -265,7 +267,7 @@ ${ components.menubar() }
     }
 
     function callJobDetails(job, finish) {
-      $.getJSON(job.url + "?format=json&rnd=" + Math.random(), function (data) {
+      $.getJSON(job.url + "?format=json", function (data) {
         if (data != null && data.job) {
           var jobTableNodes = jobTable.fnGetNodes();
           var _foundRow = null;
@@ -302,17 +304,12 @@ ${ components.menubar() }
       if ($("#showRetired").is(":checked")) {
         _url += "&retired=on";
       }
-      _url += "&rnd=" + Math.random(); // thanks IE!
       $.getJSON(_url, callback);
     }
 
-    var _filterTimeout = -1;
-    $(".search-query").on("keyup", function () {
-      window.clearTimeout(_filterTimeout);
-      _filterTimeout = window.setTimeout(function () {
-        $("#loading").removeClass("hide");
-        callJsonData(populateTable);
-      }, 300);
+    $(".search-query").jHueDelayedInput(function(){
+      $("#loading").removeClass("hide");
+      callJsonData(populateTable);
     });
 
     $("#showRetired").change(function () {

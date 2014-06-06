@@ -14,6 +14,8 @@
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
 <%!
+from django.utils.html import escape
+
 from desktop.lib.i18n import smart_unicode
 from desktop.views import commonheader, commonfooter
 from django.utils.translation import ugettext as _
@@ -27,6 +29,7 @@ from django.utils.translation import ugettext as _
   else:
     view_or_table_noun = _("Table")
 %>
+
 ${ commonheader(_("%s : %s") % (view_or_table_noun, table.name), app_name, user) | n,unicode }
 ${ components.menubar() }
 
@@ -34,6 +37,7 @@ ${ components.menubar() }
   <table class="table table-striped table-condensed datatables">
     <thead>
       <tr>
+        <th>&nbsp;</th>
         <th>${_('Name')}</th>
         <th>${_('Type')}</th>
         <th>${_('Comment')}</th>
@@ -42,9 +46,12 @@ ${ components.menubar() }
     <tbody>
       % for column in cols:
         <tr>
-          <td>${ column.name }</td>
+          <td>${ loop.index }</td>
+          <td title="${ _("Scroll to the column") }">
+            <a href="javascript:void(0)" data-row-selector="true" class="column-selector">${ column.name }</a>
+          </td>
           <td>${ column.type }</td>
-          <td>${ column.comment != 'None' and column.comment or "" }</td>
+          <td>${ column.comment != 'None' and smart_unicode(column.comment) or "" }</td>
         </tr>
       % endfor
     </tbody>
@@ -77,7 +84,7 @@ ${ components.menubar() }
         <div class="card-body">
           <p>
             % if table.comment:
-            <div class="alert alert-info">${ _('Comment:') } ${ table.comment }</div>
+            <div class="alert alert-info">${ _('Comment:') } ${ smart_unicode(table.comment) }</div>
             % endif
 
             <ul class="nav nav-tabs">
@@ -110,7 +117,7 @@ ${ components.menubar() }
                   <pre>${error_message | h}</pre>
                 </div>
               % else:
-                <table class="table table-striped table-condensed sampleTable">
+                <table id="sampleTable" class="table table-striped table-condensed sampleTable">
                   <thead>
                     <tr>
                     % for col in table.cols:
@@ -126,7 +133,7 @@ ${ components.menubar() }
                         % if item is None:
                           NULL
                         % else:
-                          ${ smart_unicode(item, errors='ignore') }
+                          ${ escape(smart_unicode(item, errors='ignore')).replace(' ', '&nbsp;') | n,unicode }
                         % endif
                       </td>
                     % endfor
@@ -208,7 +215,24 @@ ${ components.menubar() }
       "oLanguage": {
         "sEmptyTable": "${_('No data available')}",
         "sZeroRecords": "${_('No matching records')}",
-      }
+      },
+      "aoColumns": [
+        { "sWidth" : "10px" },
+        null,
+        null,
+        { "bSortable": false }
+      ],
+    });
+
+    $(".column-selector").on("click", function () {
+      var _t = $("#sample");
+      var _text = $.trim($(this).text().split("(")[0]);
+      var _col = _t.find("th").filter(function() {
+        return $.trim($(this).text()) == _text;
+      });
+      _t.find(".columnSelected").removeClass("columnSelected");
+      _t.find("tr td:nth-child(" + (_col.index() + 1) + ")").addClass("columnSelected");
+      $("a[href='#sample']").click();
     });
 
     % if has_write_access:

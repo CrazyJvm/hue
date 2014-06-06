@@ -20,6 +20,7 @@ import desktop
 import desktop.urls
 import desktop.conf
 import logging
+import json
 import os
 import time
 
@@ -37,6 +38,7 @@ from django.db.models import query, CharField, SmallIntegerField
 
 from useradmin.models import GroupPermission
 
+from beeswax.conf import HIVE_SERVER_HOST
 from desktop.lib import django_mako
 from desktop.lib.django_test_util import make_logged_in_client
 from desktop.lib.paginator import Paginator
@@ -44,7 +46,9 @@ from desktop.lib.conf import validate_path
 from desktop.lib.django_util import TruncatingModel
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.lib.test_utils import grant_access
+from desktop.models import Document
 from desktop.views import check_config, home
+from pig.models import PigScript
 
 
 def setup_test_environment():
@@ -80,11 +84,51 @@ def teardown_test_environment():
   django_mako.render_to_string = django_mako.render_to_string_normal
 teardown_test_environment.__test__ = False
 
-def test_home():
-  c = make_logged_in_client()
-  response = c.get(reverse(home))
 
+def test_home():
+  c = make_logged_in_client(username="test_home", groupname="test_home", recreate=True, is_superuser=False)
+  user = User.objects.get(username="test_home")
+
+  response = c.get(reverse(home))
+  assert_equal(["notmine", "trash", "mine", "history"], json.loads(response.context['json_tags']).keys())
   assert_equal(200, response.status_code)
+
+  script, created = PigScript.objects.get_or_create(owner=user)
+  doc = Document.objects.link(script, owner=script.owner, name='test_home')
+
+  response = c.get(reverse(home))
+  assert_true(str(doc.id) in json.loads(response.context['json_documents']))
+
+  response = c.get(reverse(home))
+  tags = json.loads(response.context['json_tags'])
+  assert_equal([doc.id], tags['mine'][0]['docs'], tags)
+  assert_equal([], tags['trash']['docs'], tags)
+  assert_equal([], tags['history']['docs'], tags)
+
+  doc.send_to_trash()
+
+  response = c.get(reverse(home))
+  tags = json.loads(response.context['json_tags'])
+  assert_equal([], tags['mine'][0]['docs'], tags)
+  assert_equal([doc.id], tags['trash']['docs'], tags)
+  assert_equal([], tags['history']['docs'], tags)
+
+  doc.restore_from_trash()
+
+  response = c.get(reverse(home))
+  tags = json.loads(response.context['json_tags'])
+  assert_equal([doc.id], tags['mine'][0]['docs'], tags)
+  assert_equal([], tags['trash']['docs'], tags)
+  assert_equal([], tags['history']['docs'], tags)
+
+  doc.add_to_history()
+
+  response = c.get(reverse(home))
+  tags = json.loads(response.context['json_tags'])
+  assert_equal([], tags['mine'][0]['docs'], tags)
+  assert_equal([], tags['trash']['docs'], tags)
+  assert_equal([doc.id], tags['history']['docs'], tags)
+
 
 def test_skip_wizard():
   c = make_logged_in_client() # is_superuser
@@ -153,10 +197,12 @@ def test_dump_config():
   c = make_logged_in_client()
 
   CANARY = "abracadabra"
-  clear = desktop.conf.HTTP_HOST.set_for_testing(CANARY)
+
+  # Depending on the order of the conf.initialize() in settings, the set_for_testing() are not seen in the global settings variable
+  clear = HIVE_SERVER_HOST.set_for_testing(CANARY)
 
   response1 = c.get(reverse('desktop.views.dump_config'))
-  assert_true(CANARY in response1.content)
+  assert_true(CANARY in response1.content, response1.content)
 
   response2 = c.get(reverse('desktop.views.dump_config'), dict(private="true"))
   assert_true(CANARY in response2.content)
@@ -176,7 +222,7 @@ def test_dump_config():
 
   # Malformed port per HUE-674
   CANARY = "asdfoijaoidfjaosdjffjfjaoojosjfiojdosjoidjfoa"
-  clear = desktop.conf.HTTP_PORT.set_for_testing(CANARY)
+  clear = HIVE_SERVER_HOST.set_for_testing(CANARY)
 
   response1 = c.get(reverse('desktop.views.dump_config'))
   assert_true(CANARY in response1.content, response1.content)
@@ -190,6 +236,10 @@ def test_dump_config():
     assert_true(CANARY in response.content, response.content)
   finally:
     finish()
+
+  # Not showing some passwords
+  response = c.get(reverse('desktop.views.dump_config'))
+  assert_false('bind_password' in response.content)
 
   # Login as someone else
   client_not_me = make_logged_in_client(username='not_me', is_superuser=False, groupname='test')

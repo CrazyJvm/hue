@@ -24,6 +24,7 @@ from django.core.urlresolvers import reverse
 from django.utils.html import escape
 from django.utils.translation import ugettext as _
 
+from desktop.lib.i18n import smart_str
 from desktop.lib.view_util import format_duration_in_millis
 from filebrowser.views import location_to_url
 from jobbrowser.views import job_single_logs
@@ -54,18 +55,15 @@ class OozieApi:
     self.user = user
 
   def submit(self, pig_script, params):
-    mapping = {
-      'oozie.use.system.libpath':  'true',
-    }
-
     workflow = None
 
     try:
       workflow = self._create_workflow(pig_script, params)
+      mapping = dict([(param['name'], param['value']) for param in workflow.get_parameters()])
       oozie_wf = _submit_workflow(self.user, self.fs, self.jt, workflow, mapping)
     finally:
       if workflow:
-        workflow.delete()
+        workflow.delete(skip_trash=True)
 
     return oozie_wf
 
@@ -73,11 +71,14 @@ class OozieApi:
     workflow = Workflow.objects.new_workflow(self.user)
     workflow.name = OozieApi.WORKFLOW_NAME
     workflow.is_history = True
+    if pig_script.use_hcatalog:
+      workflow.add_parameter("oozie.action.sharelib.for.pig", "pig,hcatalog")
     workflow.save()
     Workflow.objects.initialize(workflow, self.fs)
 
     script_path = workflow.deployment_dir + '/script.pig'
-    self.fs.do_as_user(self.user.username, self.fs.create, script_path, data=pig_script.dict['script'])
+    if self.fs: # For testing, difficult to mock
+      self.fs.do_as_user(self.user.username, self.fs.create, script_path, data=smart_str(pig_script.dict['script']))
 
     files = []
     archives = []

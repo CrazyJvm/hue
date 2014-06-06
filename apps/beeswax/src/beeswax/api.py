@@ -17,6 +17,7 @@
 
 import json
 import logging
+import re
 
 from django.core.urlresolvers import reverse
 from django.http import HttpResponse, Http404
@@ -31,13 +32,16 @@ from jobsub.parameterization import substitute_variables
 import beeswax.models
 
 from beeswax.forms import QueryForm
+from beeswax.data_export import upload
 from beeswax.design import HQLdesign
 from beeswax.server import dbms
-from beeswax.server.dbms import expand_exception, get_query_server_config
+from beeswax.server.dbms import expand_exception, get_query_server_config,\
+  QueryServerException
 from beeswax.views import authorized_get_design, authorized_get_query_history, make_parameterization_form,\
                           safe_get_design, save_design, massage_columns_for_json, _get_query_handle_and_state,\
                           _parse_out_hadoop_jobs
 from desktop.lib.i18n import force_unicode
+from desktop.lib.exceptions_renderable import PopupException
 
 
 LOG = logging.getLogger(__name__)
@@ -54,7 +58,7 @@ def error_handler(view_fn):
         message = str(e)
       else:
         message = force_unicode(e.message, strings_only=True, errors='replace')
-        
+
         if 'Invalid OperationHandle' in message and 'id' in kwargs:
           # Expired state.
           query_history = authorized_get_query_history(request, kwargs['id'], must_exist=False)
@@ -66,6 +70,11 @@ def error_handler(view_fn):
         'status': -1,
         'message': message,
       }
+
+      if re.search('database is locked|Invalid query handle|not JSON serializable', message, re.IGNORECASE):
+        response['status'] = 2 # Frontend will not display this type of error
+        LOG.warn('error_handler silencing the exception: %s' % e)
+
       return HttpResponse(json.dumps(response), mimetype="application/json", status=200)
   return decorator
 
@@ -152,8 +161,10 @@ def watch_query_refresh_json(request, id):
   # Go to next statement if asked to continue or when a statement with no dataset finished.
   try:
     if request.POST.get('next') or (not query_history.is_finished() and query_history.is_success() and not query_history.has_results):
-      query_history = db.execute_next_statement(query_history)
+      query_history = db.execute_next_statement(query_history, request.POST.get('query-query'))
       handle, state = _get_query_handle_and_state(query_history)
+  except QueryServerException, ex:
+    raise ex
   except Exception, ex:
     LOG.exception(ex)
     handle, state = _get_query_handle_and_state(query_history)
@@ -164,9 +175,10 @@ def watch_query_refresh_json(request, id):
     log = str(ex)
 
   jobs = _parse_out_hadoop_jobs(log)
-  job_urls = dict([(job, reverse('jobbrowser.views.single_job', kwargs={'job': job})) for job in jobs])
+  job_urls = massage_job_urls_for_json(jobs)
 
   result = {
+    'status': 0,
     'log': log,
     'jobs': jobs,
     'jobUrls': job_urls,
@@ -184,9 +196,18 @@ def watch_query_refresh_json(request, id):
       result['message'] = res.errorMessage
     else:
       result['message'] = _('Bad status for request %s:\n%s') % (id, res)
-    result['status'] = 1
+    result['status'] = -1
 
   return HttpResponse(json.dumps(result), mimetype="application/json")
+
+def massage_job_urls_for_json(jobs):
+  massaged_jobs = []
+  for job in jobs:
+    massaged_jobs.append({
+      'name': job,
+      'url': reverse('jobbrowser.views.single_job', kwargs={'job': job})
+    })
+  return massaged_jobs
 
 
 def close_operation(request, query_history_id):
@@ -218,7 +239,8 @@ def explain_directly(request, query, design, query_server):
 
   response = {
     'status': 0,
-    'explanation': explanation.textual
+    'explanation': explanation.textual,
+    'statement': query.get_query_statement(0),
   }
 
   return HttpResponse(json.dumps(response), mimetype="application/json")
@@ -309,7 +331,12 @@ def save_query_design(request, design_id=None):
       response['design_id'] = design.id
       response['status'] = 0
     else:
-      response['errors'] = query_form.errors
+      response['errors'] = {
+        'query': [query_form.query.errors],
+        'settings': query_form.settings.errors,
+        'file_resources': query_form.file_resources.errors,
+        'functions': query_form.functions.errors
+      }
   except RuntimeError, e:
     response['message'] = str(e)
 
@@ -362,9 +389,11 @@ def cancel_query(request, query_history_id):
 
 
 @error_handler
-def save_results(request, query_history_id):
+def save_results_hdfs_directory(request, query_history_id):
   """
-  Save the results of a query to an HDFS directory or Hive table.
+  Save the results of a query to an HDFS directory.
+
+  Rerun the query.
   """
   response = {'status': 0, 'message': ''}
 
@@ -381,53 +410,149 @@ def save_results(request, query_history_id):
       response['status'] = -1
       return HttpResponse(json.dumps(response), mimetype="application/json")
 
-    # massage data to work with old forms
-    data = {}
-    if request.POST.get('type') == 'hive-table':
-      data['save_target'] = 'to a new table'
-      data['target_table'] = request.POST.get('path', None)
-    elif request.POST.get('type') == 'hdfs':
-      data['save_target'] = 'to HDFS directory'
-      data['target_dir'] = request.POST.get('path', None)
+    db = dbms.get(request.user, query_history.get_query_server_config())
+
+    form = beeswax.forms.SaveResultsDirectoryForm({
+      'target_dir': request.POST.get('path')
+    }, fs=request.fs)
+
+    if form.is_valid():
+      target_dir = request.POST.get('path')
+      try:
+        response['type'] = 'hdfs-dir'
+        response['id'] = query_history.id
+        response['query'] = query_history.query
+        response['path'] = target_dir
+        response['success_url'] = '/filebrowser/view%s' % target_dir
+        query_history = db.insert_query_into_directory(query_history, target_dir)
+        response['watch_url'] = reverse(get_app_name(request) + ':api_watch_query_refresh_json', kwargs={'id': query_history.id})
+      except Exception, ex:
+        error_msg, log = expand_exception(ex, db)
+        response['message'] = _('The result could not be saved: %s.') % error_msg
+        response['status'] = -3
     else:
-      data['save_target'] = None
-      data['target_table'] = request.POST.get('path', None)
-      data['target_dir'] = request.POST.get('path', None)
+      response['status'] = 1
+      response['errors'] = form.errors
+
+  return HttpResponse(json.dumps(response), mimetype="application/json")
+
+
+@error_handler
+def save_results_hdfs_file(request, query_history_id):
+  """
+  Save the results of a query to an HDFS file.
+
+  Do not rerun the query.
+  """
+  response = {'status': 0, 'message': ''}
+
+  query_history = authorized_get_query_history(request, query_history_id, must_exist=True)
+  server_id, state = _get_query_handle_and_state(query_history)
+  query_history.save_state(state)
+  error_msg, log = None, None
+
+  if request.method != 'POST':
+    response['message'] = _('A POST request is required.')
+  else:
+    if not query_history.is_success():
+      response['message'] = _('This query is %(state)s. Results unavailable.') % {'state': state}
+      response['status'] = -1
+      return HttpResponse(json.dumps(response), mimetype="application/json")
 
     db = dbms.get(request.user, query_history.get_query_server_config())
-    form = beeswax.forms.SaveResultsForm(data, db=db, fs=request.fs)
+
+    form = beeswax.forms.SaveResultsFileForm({
+      'target_file': request.POST.get('path'),
+      'overwrite': request.POST.get('overwrite', False),
+    })
+
+    if form.is_valid():
+      target_file = form.cleaned_data['target_file']
+      overwrite = form.cleaned_data['overwrite']
+
+      try:
+        handle, state = _get_query_handle_and_state(query_history)
+      except Exception, ex:
+        response['message'] = _('Cannot find query handle and state: %s') % str(query_history)
+        response['status'] = -2
+        return HttpResponse(json.dumps(response), mimetype="application/json")
+
+      try:
+        if overwrite and request.fs.exists(target_file):
+          if request.fs.isfile(target_file):
+            request.fs.do_as_user(request.user.username, request.fs.rmtree, target_file)
+          else:
+            raise PopupException(_("The target path is a directory"))
+
+        upload(target_file, handle, request.user, db, request.fs)
+
+        response['type'] = 'hdfs-file'
+        response['id'] = query_history.id
+        response['query'] = query_history.query
+        response['path'] = target_file
+        response['success_url'] = '/filebrowser/view%s' % target_file
+        response['watch_url'] = reverse(get_app_name(request) + ':api_watch_query_refresh_json', kwargs={'id': query_history.id})
+      except Exception, ex:
+        error_msg, log = expand_exception(ex, db)
+        response['message'] = _('The result could not be saved: %s.') % error_msg
+        response['status'] = -3
+    else:
+      response['status'] = 1
+      response['errors'] = form.errors
+
+  return HttpResponse(json.dumps(response), mimetype="application/json")
+
+
+@error_handler
+def save_results_hive_table(request, query_history_id):
+  """
+  Save the results of a query to a hive table.
+
+  Rerun the query.
+  """
+  response = {'status': 0, 'message': ''}
+
+  query_history = authorized_get_query_history(request, query_history_id, must_exist=True)
+  server_id, state = _get_query_handle_and_state(query_history)
+  query_history.save_state(state)
+  error_msg, log = None, None
+
+  if request.method != 'POST':
+    response['message'] = _('A POST request is required.')
+  else:
+    if not query_history.is_success():
+      response['message'] = _('This query is %(state)s. Results unavailable.') % {'state': state}
+      response['status'] = -1
+      return HttpResponse(json.dumps(response), mimetype="application/json")
+
+    db = dbms.get(request.user, query_history.get_query_server_config())
+    database = query_history.design.get_design().query.get('database', 'default')
+    form = beeswax.forms.SaveResultsTableForm({
+      'target_table': request.POST.get('table')
+    }, db=db, database=database)
 
     if form.is_valid():
       try:
         handle, state = _get_query_handle_and_state(query_history)
         result_meta = db.get_results_metadata(handle)
       except Exception, ex:
-        response['message'] = _('Cannot find query: %s') % {'state': state}
+        response['message'] = _('Cannot find query handle and state: %s') % str(query_history)
         response['status'] = -2
         return HttpResponse(json.dumps(response), mimetype="application/json")
 
       try:
-        if form.cleaned_data['save_target'] == form.SAVE_TYPE_DIR:
-          target_dir = form.cleaned_data['target_dir']
-          query_history = db.insert_query_into_directory(query_history, target_dir)
-          response['type'] = 'hdfs'
-          response['id'] = query_history.id
-          response['query'] = query_history.query
-          response['path'] = target_dir
-          response['success_url'] = '/filebrowser/view%s' % target_dir
-          response['watch_url'] = reverse(get_app_name(request) + ':api_watch_query_refresh_json', kwargs={'id': query_history.id})
-        elif form.cleaned_data['save_target'] == form.SAVE_TYPE_TBL:
-          query_history = db.create_table_as_a_select(request, query_history, form.cleaned_data['target_table'], result_meta)
-          response['id'] = query_history.id
-          response['query'] = query_history.query
-          response['type'] = 'hive-table'
-          response['path'] = form.cleaned_data['target_table']
-          response['success_url'] = reverse('metastore:describe_table', kwargs={'database': 'default', 'table': form.cleaned_data['target_table']})
-          response['watch_url'] = reverse(get_app_name(request) + ':api_watch_query_refresh_json', kwargs={'id': query_history.id})
+        query_history = db.create_table_as_a_select(request, query_history, form.target_database, form.cleaned_data['target_table'], result_meta)
+        response['id'] = query_history.id
+        response['query'] = query_history.query
+        response['type'] = 'hive-table'
+        response['path'] = form.cleaned_data['target_table']
+        response['success_url'] = reverse('metastore:describe_table', kwargs={'database': form.target_database, 'table': form.cleaned_data['target_table']})
+        response['watch_url'] = reverse(get_app_name(request) + ':api_watch_query_refresh_json', kwargs={'id': query_history.id})
       except Exception, ex:
         error_msg, log = expand_exception(ex, db)
         response['message'] = _('The result could not be saved: %s.') % error_msg
         response['status'] = -3
+
     else:
       response['status'] = 1
       response['errors'] = form.errors
@@ -466,6 +591,15 @@ def query_history_to_dict(request, query_history):
     query_history_dict['design'] = design_to_dict(query_history.design)
 
   return query_history_dict
+
+
+# Proxy API for Metastore App
+def describe_table(request, database, table):
+  try:
+    from metastore.views import describe_table
+    return describe_table(request, database, table)
+  except Exception, e:
+    raise PopupException(_('Problem accessing table metadata'), detail=e)
 
 
 def get_query_form(request):

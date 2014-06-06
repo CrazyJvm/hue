@@ -24,17 +24,20 @@ from django.utils.functional import wraps
 from django.utils.translation import ugettext as _
 from django.core.urlresolvers import reverse
 
+from desktop.context_processors import get_app_name
 from desktop.lib.django_util import render
 from desktop.lib.exceptions_renderable import PopupException
 
 from beeswax.design import hql_query
 from beeswax.models import SavedQuery, MetaInstall
 from beeswax.server import dbms
-
+from beeswax.server.dbms import get_query_server_config
 from metastore.forms import LoadDataForm, DbForm
 from metastore.settings import DJANGO_APPS
 
+
 LOG = logging.getLogger(__name__)
+
 SAVE_RESULTS_CTAS_TIMEOUT = 300         # seconds
 
 
@@ -44,7 +47,7 @@ def check_has_write_access_permission(view_func):
   """
   def decorate(request, *args, **kwargs):
     if not has_write_access(request.user):
-      raise PopupException(_('You are not allowed to modify the metastore.'), detail=_('You have metastore:read_only_access permissions'))
+      raise PopupException(_('You are not allowed to modify the metastore.'), detail=_('You have must have metastore:write permissions'), error_code=301)
 
     return view_func(request, *args, **kwargs)
   return wraps(view_func)(decorate)
@@ -104,6 +107,9 @@ def show_tables(request, database=None):
 
   databases = db.get_databases()
 
+  if database not in databases:
+    database = 'default'
+
   if request.method == 'POST':
     db_form = DbForm(request.POST, databases=databases)
     if db_form.is_valid():
@@ -131,7 +137,10 @@ def show_tables(request, database=None):
 
 
 def describe_table(request, database, table):
-  db = dbms.get(request.user)
+  app_name = get_app_name(request)
+  query_server = get_query_server_config(app_name)
+  db = dbms.get(request.user, query_server)
+
   error_message = ''
   table_data = ''
 
@@ -139,8 +148,9 @@ def describe_table(request, database, table):
     table = db.get_table(database, table)
   except Exception, e:
     raise PopupException(_("Hive Error"), detail=e)
+
   partitions = None
-  if table.partition_keys:
+  if app_name != 'impala' and table.partition_keys:
     partitions = db.get_partitions(database, table, max_parts=None)
 
   try:
@@ -300,4 +310,4 @@ def analyze_table(request, database, table, column=None):
 
 
 def has_write_access(user):
-  return user.is_superuser or not user.has_hue_permission(action="read_only_access", app=DJANGO_APPS[0])
+  return user.is_superuser or user.has_hue_permission(action="write", app=DJANGO_APPS[0])

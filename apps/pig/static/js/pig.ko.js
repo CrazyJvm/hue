@@ -37,6 +37,7 @@ var PigScript = function (pigScript) {
   self.id = ko.observable(pigScript.id);
   self.isDesign = ko.observable(pigScript.isDesign);
   self.name = ko.observable(pigScript.name);
+  self.can_write = ko.observable(pigScript.can_write);
   self.script = ko.observable(pigScript.script);
   self.scriptSumup = ko.observable(pigScript.script.replace(/\W+/g, ' ').substring(0, 100));
   self.isRunning = ko.observable(false);
@@ -66,7 +67,7 @@ var PigScript = function (pigScript) {
   };
   self.getParameters = function () {
     var params = {};
-    var variables = this.script().match(/\$\D(\w*)/g);
+    var variables = this.script().match(/\$[^\d'"](\w*)/g);
     var macro_defines = this.script().match(/define [^ ]+ \(([^\)]*)\)/gi); // no multiline
     var macro_returns = this.script().match(/returns +([^\{]*)/gi); // no multiline
 
@@ -205,7 +206,8 @@ var PigViewModel = function (props) {
     parameters: self.LABELS.NEW_SCRIPT_PARAMETERS,
     resources: self.LABELS.NEW_SCRIPT_RESOURCES,
     hadoopProperties: self.LABELS.NEW_SCRIPT_HADOOP_PROPERTIES,
-    parentModel: self
+    parentModel: self,
+    can_write: true
   };
 
   self.currentScript = ko.observable(new PigScript(_defaultScript));
@@ -502,11 +504,16 @@ var PigViewModel = function (props) {
           self.currentScript().id(data.id);
           $(document).trigger("saved");
           self.updateScripts();
-        }, "json");
+        }, "json").fail( function(xhr, textStatus, errorThrown) {
+          $(document).trigger("error", xhr.responseText);
+        });
   }
 
   function callRun(script) {
     self.currentScript(script);
+    $(document).trigger("clearLogs");
+    script.isRunning(true);
+    script.actions([]);
     $(document).trigger("showLogs");
     $(document).trigger("running");
     $("#submitModal").modal("hide");
@@ -538,12 +545,18 @@ var PigViewModel = function (props) {
   function callStop(script) {
     $(document).trigger("stopping");
     $.post(self.STOP_URL, {
-        id: script.id()
-      },
-      function (data) {
-        $(document).trigger("stopped");
-        $("#stopModal").modal("hide");
-      }, "json");
+          id: script.id()
+        },
+        function (data) {
+          $(document).trigger("stopped");
+          $("#stopModal").modal("hide");
+        }, "json"
+    ).fail(function () {
+      self.currentScript().isRunning(false);
+      $(document).trigger("stopError");
+      $(document).trigger("stopped");
+      $("#stopModal").modal("hide");
+    });
   }
 
   function callCopy(script) {

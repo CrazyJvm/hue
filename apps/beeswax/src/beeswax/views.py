@@ -18,6 +18,8 @@
 import json
 import logging
 import re
+import sys
+import time
 
 from django import forms
 from django.contrib import messages
@@ -25,14 +27,17 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.http import HttpResponse, QueryDict
 from django.shortcuts import redirect
+from django.utils.html import escape
 from django.utils.translation import ugettext as _
 from django.core.urlresolvers import reverse
 
+from desktop.appmanager import get_apps_dict
 from desktop.context_processors import get_app_name
 from desktop.lib.paginator import Paginator
 from desktop.lib.django_util import copy_query_dict, format_preserving_redirect, render
 from desktop.lib.django_util import login_notrequired, get_desktop_uri_prefix
 from desktop.lib.exceptions_renderable import PopupException
+from desktop.lib.i18n import smart_unicode
 from desktop.models import Document
 
 from jobsub.parameterization import find_variables
@@ -42,9 +47,9 @@ import beeswax.design
 import beeswax.management.commands.beeswax_install_examples
 
 from beeswax import common, data_export, models
-from beeswax.models import SavedQuery, make_query_context, QueryHistory
+from beeswax.models import SavedQuery, QueryHistory
 from beeswax.server import dbms
-from beeswax.server.dbms import expand_exception, get_query_server_config
+from beeswax.server.dbms import expand_exception, get_query_server_config, QueryServerException
 
 
 LOG = logging.getLogger(__name__)
@@ -71,6 +76,7 @@ def save_design(request, form, type_, design, explicit_save):
   Need to return a SavedQuery because we may end up with a different one.
   Assumes that form.saveform is the SaveForm, and that it is valid.
   """
+  authorized_get_design(request, design.id)
   assert form.saveform.is_valid()
   sub_design_form = form # Beeswax/Impala case
 
@@ -85,22 +91,30 @@ def save_design(request, form, type_, design, explicit_save):
   else:
     raise ValueError(_('Invalid design type %(type)s') % {'type': type_})
 
+  design_obj = design_cls(sub_design_form, query_type=type_)
+  name = form.saveform.cleaned_data['name']
+  desc = form.saveform.cleaned_data['desc']
+
+  return _save_design(request.user, design, type_, design_obj, explicit_save, name, desc)
+
+
+def _save_design(user, design, type_, design_obj, explicit_save, name=None, desc=None):
   # Design here means SavedQuery
   old_design = design
-  design_obj = design_cls(sub_design_form, query_type=type_)
   new_data = design_obj.dumps()
 
   # Auto save if (1) the user didn't click "save", and (2) the data is different.
-  # Don't generate an auto-saved design if the user didn't change anything
-  if explicit_save:
-    design.name = form.saveform.cleaned_data['name']
-    design.desc = form.saveform.cleaned_data['desc']
+  # Create an history design if the user is executing a shared design.
+  # Don't generate an auto-saved design if the user didn't change anything.
+  if explicit_save and (not design.doc.exists() or design.doc.get().can_write_or_exception(user)):
+    design.name = name
+    design.desc = desc
     design.is_auto = False
   elif design_obj != old_design.get_design():
     # Auto save iff the data is different
     if old_design.id is not None:
       # Clone iff the parent design isn't a new unsaved model
-      design = old_design.clone()
+      design = old_design.clone(new_owner=user)
       if not old_design.is_auto:
         design.name = old_design.name + models.SavedQuery.AUTO_DESIGN_SUFFIX
     else:
@@ -169,15 +183,10 @@ def clone_design(request, design_id):
     LOG.error('Cannot clone non-existent design %s' % (design_id,))
     return list_designs(request)
 
-  copy = design.clone()
-  copy_doc = design.doc.get().copy()
-  copy.name = design.name + ' (copy)'
-  copy.owner = request.user
+  copy = design.clone(request.user)
   copy.save()
-
-  copy_doc.owner = copy.owner
-  copy_doc.name = copy.name
-  copy_doc.save()
+  copy_doc = design.doc.get().copy(owner=request.user)
+  copy.doc.all().delete()
   copy.doc.add(copy_doc)
 
   messages.info(request, _('Copied design: %(name)s') % {'name': design.name})
@@ -312,6 +321,13 @@ def list_query_history(request):
 
   filter = request.GET.get(prefix + 'search') and request.GET.get(prefix + 'search') or ''
 
+  if request.GET.get('format') == 'json':
+    resp = {
+      'queries': [massage_query_history_for_json(app_name, query_history) for query_history in page.object_list]
+    }
+    return HttpResponse(json.dumps(resp), mimetype="application/json")
+
+
   return render('list_history.mako', request, {
     'request': request,
     'page': page,
@@ -321,16 +337,28 @@ def list_query_history(request):
     'filter': filter,
   })
 
+def massage_query_history_for_json(app_name, query_history):
+  return {
+    'query': query_history.query,
+    'timeInMs': time.mktime(query_history.submission_date.timetuple()),
+    'timeFormatted': query_history.submission_date.strftime("%x %X"),
+    'designUrl': reverse(app_name + ':execute_design', kwargs={'design_id': query_history.design.id}),
+    'resultsUrl': not query_history.is_failure() and reverse(app_name + ':watch_query_history', kwargs={'query_history_id': query_history.id}) or ""
+  }
 
 def download(request, id, format):
-  assert format in common.DL_FORMATS
+  try:
+    query_history = authorized_get_query_history(request, id, must_exist=True)
+    db = dbms.get(request.user, query_history.get_query_server_config())
+    LOG.debug('Download results for query %s: [ %s ]' % (query_history.server_id, query_history.query))
 
-  query_history = authorized_get_query_history(request, id, must_exist=True)
-  db = dbms.get(request.user, query_history.get_query_server_config())
-  LOG.debug('Download results for query %s: [ %s ]' % (query_history.server_id, query_history.query))
-
-  return data_export.download(query_history.get_handle(), format, db)
-
+    return data_export.download(query_history.get_handle(), format, db)
+  except Exception, e:
+    if not hasattr(e, 'message') or not e.message:
+      message = e
+    else:
+      message = e.message
+    raise PopupException(message, detail='')
 
 """
 Queries Views
@@ -346,13 +374,24 @@ def execute_query(request, design_id=None, query_history_id=None):
     query_history = authorized_get_query_history(request, query_history_id, must_exist=True)
     design = query_history.design
 
-    if 'on_success_url' in request.GET:
-      if request.GET.get('on_success_url'):
-        action = 'watch-redirect'
+    try:
+      if query_history.server_id and query_history.server_guid:
+        handle, state = _get_query_handle_and_state(query_history)
+
+      if 'on_success_url' in request.GET:
+        if request.GET.get('on_success_url'):
+          action = 'watch-redirect'
+        else:
+          action = 'watch-results'
       else:
-        action = 'watch-results'
-    else:
-      action = 'editor-results'
+        action = 'editor-results'
+    except QueryServerException, e:
+      if 'Invalid query handle' in e.message or 'Invalid OperationHandle' in e.message:
+        query_history.save_state(QueryHistory.STATE.expired)
+        LOG.warn("Invalid query handle", exc_info=sys.exc_info())
+        action = 'editor-expired-results'
+      else:
+        raise e
   else:
     # Check perms.
     authorized_get_design(request, design_id)
@@ -368,8 +407,10 @@ def execute_query(request, design_id=None, query_history_id=None):
     'query_history': query_history,
     'autocomplete_base_url': reverse(get_app_name(request) + ':api_autocomplete_databases', kwargs={}),
     'can_edit_name': design and design.id and not design.is_auto,
+    'can_edit': design and design.id and design.doc.get().can_write(request.user),
     'action': action,
-    'on_success_url': request.GET.get('on_success_url')
+    'on_success_url': request.GET.get('on_success_url'),
+    'has_metastore': 'metastore' in get_apps_dict(request.user)
   }
 
   return render('execute.mako', request, context)
@@ -412,15 +453,9 @@ def view_results(request, id, first_row=0):
   context_param = request.GET.get('context', '')
   query_context = parse_query_context(context_param)
 
-  # To remove when Impala has start_over support
-  download = request.GET.get('download', '') or app_name != 'impala'
-
   # Update the status as expired should not be accessible
   # Impala does not support startover for now
   expired = state == models.QueryHistory.STATE.expired
-  if expired or app_name == 'impala':
-    state = models.QueryHistory.STATE.expired
-    query_history.save_state(state)
 
   # Retrieve query results or use empty result if no result set
   try:
@@ -428,7 +463,22 @@ def view_results(request, id, first_row=0):
       downloadable = False
     else:
       results = db.fetch(handle, start_over, 100)
-      data = list(results.rows()) # Materialize results
+      data = []
+
+      # Materialize and HTML escape results
+      # TODO: use Number + list comprehension
+      for row in results.rows():
+        escaped_row = []
+        for field in row:
+          if isinstance(field, (int, long, float, complex, bool)):
+            escaped_field = field
+          elif field is None:
+            escaped_field = 'NULL'
+          else:
+            field = smart_unicode(field, errors='replace') # Prevent error when getting back non utf8 like charset=iso-8859-1
+            escaped_field = escape(field).replace(' ', '&nbsp;')
+          escaped_row.append(escaped_field)
+        data.append(escaped_row)
 
       # We display the "Download" button only when we know that there are results:
       downloadable = first_row > 0 or data
@@ -444,7 +494,7 @@ def view_results(request, id, first_row=0):
 
   context = {
     'error': error,
-    'error_message': error_message,
+    'message': error_message,
     'query': query_history,
     'results': data,
     'columns': columns,
@@ -456,7 +506,6 @@ def view_results(request, id, first_row=0):
     'context_param': context_param,
     'expired': expired,
     'app_name': app_name,
-    'download': download,
     'next_json_set': None,
     'is_finished': query_history.is_finished()
   }
@@ -467,7 +516,6 @@ def view_results(request, id, first_row=0):
       for format in common.DL_FORMATS:
         download_urls[format] = reverse(app_name + ':download', kwargs=dict(id=str(id), format=format))
 
-    save_form = beeswax.forms.SaveResultsForm()
     results.start_row = first_row
 
     context.update({
@@ -479,7 +527,6 @@ def view_results(request, id, first_row=0):
       'expected_first_row': first_row,
       'columns': columns,
       'download_urls': download_urls,
-      'save_form': save_form,
       'can_save': query_history.owner == request.user,
       'next_json_set':
         reverse(get_app_name(request) + ':view_results', kwargs={
@@ -490,15 +537,12 @@ def view_results(request, id, first_row=0):
         + ('?context=' + context_param or '') + '&format=json'
     })
 
-  if request.GET.get('format') == 'json':
-    context['columns'] = massage_columns_for_json(columns)
-    if 'save_form' in context:
-      del context['save_form']
-    if 'query' in context:
-      del context['query']
-    return HttpResponse(json.dumps(context), mimetype="application/json")
-  else:
-    return render('watch_results.mako', request, context)
+  context['columns'] = massage_columns_for_json(columns)
+  if 'save_form' in context:
+    del context['save_form']
+  if 'query' in context:
+    del context['query']
+  return HttpResponse(json.dumps(context), mimetype="application/json")
 
 
 def configuration(request):
@@ -590,11 +634,10 @@ def massage_columns_for_json(cols):
     })
   return massaged_cols
 
-
-# owner_only is deprecated
 def authorized_get_design(request, design_id, owner_only=False, must_exist=False):
   if design_id is None and not must_exist:
     return None
+
   try:
     design = SavedQuery.objects.get(id=design_id)
   except SavedQuery.DoesNotExist:
@@ -613,6 +656,7 @@ def authorized_get_design(request, design_id, owner_only=False, must_exist=False
 def authorized_get_query_history(request, query_history_id, owner_only=False, must_exist=False):
   if query_history_id is None and not must_exist:
     return None
+
   try:
     query_history = QueryHistory.get(id=query_history_id)
   except QueryHistory.DoesNotExist:
@@ -799,12 +843,7 @@ def _get_query_handle_and_state(query_history):
   if handle is None:
     raise PopupException(_("Failed to retrieve query state from the Query Server."))
 
-  query_server = query_history.get_query_server_config()
-
-  if query_server['server_name'] == 'impala' and not handle.has_result_set:
-    state = QueryHistory.STATE.available
-  else:
-    state = dbms.get(query_history.owner, query_history.get_query_server_config()).get_state(handle)
+  state = dbms.get(query_history.owner, query_history.get_query_server_config()).get_state(handle)
 
   if state is None:
     raise PopupException(_("Failed to contact Server to check query status."))

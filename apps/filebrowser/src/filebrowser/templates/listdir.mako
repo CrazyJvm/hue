@@ -85,7 +85,7 @@ ${ fb_components.menubar() }
               </a>
               <ul class="dropdown-menu">
                 <li><a href="#" class="upload-link" title="${_('Files')}" data-bind="click: uploadFile"><i class="fa fa-file-o"></i> ${_('Files')}</a></li>
-                <li><a href="#" class="upload-link" title="${_('Archive')}" data-bind="click: uploadArchive"><i class="fa fa-gift"></i> ${_('Zip file')}</a></li>
+                <li><a href="#" class="upload-link" title="${_('Archive')}" data-bind="click: uploadArchive"><i class="fa fa-gift"></i> ${_('Zip/Tgz file')}</a></li>
               </ul>
             </div>
             <div class="btn-group" style="vertical-align: middle">
@@ -93,7 +93,7 @@ ${ fb_components.menubar() }
                 <i class="fa fa-plus-circle"></i> ${_('New')}
                 <span class="caret"></span>
               </a>
-              <ul class="dropdown-menu" style="top: auto">
+              <ul class="dropdown-menu pull-right" style="top: auto">
                 <li><a href="#" class="create-file-link" title="${_('File')}"><i class="fa fa-file-o"></i> ${_('File')}</a></li>
                 <li><a href="#" class="create-directory-link" title="${_('Directory')}"><i class="fa fa-folder"></i> ${_('Directory')}</a></li>
               </ul>

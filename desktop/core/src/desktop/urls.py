@@ -62,6 +62,7 @@ dynamic_patterns += patterns('desktop.views',
   (r'^desktop/prefs/(?P<key>\w+)?$', 'prefs'),
   (r'^desktop/status_bar/?$', 'status_bar'),
   (r'^desktop/debug/threads$', 'threads'),
+  (r'^desktop/debug/memory$', 'memory'),
   (r'^desktop/debug/who_am_i$', 'who_am_i'),
   (r'^desktop/debug/check_config$', 'check_config'),
   (r'^desktop/debug/check_config_ajax$', 'check_config_ajax'),
@@ -70,6 +71,9 @@ dynamic_patterns += patterns('desktop.views',
   # Jasmine
   (r'^jasmine', 'jasmine'),
 
+  # Unsupported browsers
+  (r'^boohoo$','unsupported'),
+
   # Top level web page!
   (r'^$', 'index'),
 )
@@ -77,9 +81,7 @@ dynamic_patterns += patterns('desktop.views',
 dynamic_patterns += patterns('desktop.api',
   # Tags
   (r'^desktop/api/tag/add_tag$', 'add_tag'),
-  (r'^desktop/api/tag/remove_tags$', 'remove_tags'),
-  (r'^desktop/api/tag/list_tags$', 'list_tags'),
-  (r'^desktop/api/doc/list_docs$', 'list_docs'),
+  (r'^desktop/api/tag/remove_tag$', 'remove_tag'),
   (r'^desktop/api/doc/tag$', 'tag'),
   (r'^desktop/api/doc/update_tags$', 'update_tags'),
 
@@ -105,6 +107,18 @@ if settings.SAML_AUTHENTICATION:
 # OpenId specific
 if settings.OPENID_AUTHENTICATION:
     static_patterns.append((r'^openid/', include('libopenid.urls')))
+
+if settings.OAUTH_AUTHENTICATION:
+  static_patterns.append((r'^oauth/', include('liboauth.urls')))
+  static_patterns.append(static_pattern("liboauth_static",
+        os.path.join(os.path.dirname(__file__), "..", '..', '..', "libs/liboauth/src/liboauth/static/")))
+
+# Add indexer app
+if 'search' in [app.name for app in appmanager.DESKTOP_APPS]:
+  namespace = {'namespace': 'indexer', 'app_name': 'indexer'}
+  dynamic_patterns.extend( patterns('', ('^indexer/', include('indexer.urls', **namespace))) )
+  static_patterns.append(static_pattern('indexer/static',
+                                        os.path.join(os.path.dirname(__file__), "..", '..', '..', "libs/indexer/static/")))
 
 # Root each app at /appname if they have a "urls" module
 for app in appmanager.DESKTOP_APPS:

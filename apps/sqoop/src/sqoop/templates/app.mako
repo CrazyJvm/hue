@@ -639,7 +639,7 @@ ${ commonheader(None, "sqoop", user) | n,unicode }
 <script src="/static/ext/js/knockout-min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/knockout.mapping-2.3.2.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/bootstrap-editable.min.js"></script>
-<script src="/static/ext/js/knockout.x-editable.js"></script>
+<script src="/static/js/ko.editable.js"></script>
 <script src="/static/js/jquery.hdfsautocomplete.js" type="text/javascript" charset="utf-8"></script>
 <script src="/sqoop/static/js/cclass.js" type="text/javascript" charset="utf-8"></script>
 <script src="/sqoop/static/js/koify.js" type="text/javascript" charset="utf-8"></script>
@@ -1210,16 +1210,18 @@ $(document).ready(function () {
       });
     },
     "connection/edit-cancel": function() {
-      if (!viewModel.connection().persisted()) {
+      if (viewModel.connection() && !viewModel.connection().persisted()) {
         viewModel.connections.pop();
       }
       // routie('job/edit');
       window.history.go(-2);
     },
     "connection/new": function() {
-      viewModel.newConnection();
+      $(window).one('hashchange', function() {
+        viewModel.newConnection();
+        routie('connection/edit');
+      });
       window.history.back();
-      routie('connection/edit');
     },
     "connection/save": function() {
       viewModel.saveConnection();

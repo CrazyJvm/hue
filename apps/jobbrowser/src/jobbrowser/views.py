@@ -20,6 +20,7 @@ import re
 import time
 import logging
 import string
+import urlparse
 from urllib import quote_plus
 from lxml import html
 
@@ -30,11 +31,14 @@ from django.core.urlresolvers import reverse
 
 from desktop.log.access import access_warn, access_log_level
 from desktop.lib.rest.http_client import RestException
+from desktop.lib.rest.resource import Resource
 from desktop.lib.django_util import render_json, render, copy_query_dict, encode_json_for_js
 from desktop.lib.exceptions import MessageException
 from desktop.lib.exceptions_renderable import PopupException
 from desktop.views import register_status_bar_view
+from hadoop import cluster
 from hadoop.api.jobtracker.ttypes import ThriftJobPriority, TaskTrackerNotFoundException, ThriftJobState
+from hadoop.yarn.clients import get_log_client
 
 from jobbrowser import conf
 from jobbrowser.api import get_api, ApplicationNotRunning
@@ -75,7 +79,7 @@ def job_not_assigned(request, jobid, path):
     except ApplicationNotRunning, e:
       result['status'] = 1
     except Exception, e:
-      result['message'] = _('Error polling job %s: e') % (jobid, e)
+      result['message'] = _('Error polling job %s: %s') % (jobid, e)
 
     return HttpResponse(encode_json_for_js(result), mimetype="application/json")
   else:
@@ -99,7 +103,8 @@ def jobs(request):
     'user_filter': user,
     'text_filter': text,
     'retired': retired,
-    'filtered': not (state == 'all' and user == '' and text == '')
+    'filtered': not (state == 'all' and user == '' and text == ''),
+    'is_yarn': cluster.is_yarn()
   })
 
 def massage_job_for_json(job, request):
@@ -233,11 +238,15 @@ def job_attempt_logs_json(request, job, attempt_index=0, name='syslog', offset=0
     raise KeyError(_("Cannot find job attempt '%(id)s'.") % {'id': job.jobId}, e)
 
   link = '/%s/' % name
+  params = {}
   if offset and int(offset) >= 0:
-    link += '?start=%s' % offset
+    params['start'] = offset
+
+  root = Resource(get_log_client(log_link), urlparse.urlsplit(log_link)[2], urlencode=False)
 
   try:
-    log = html.parse(log_link + link).xpath('/html/body/table/tbody/tr/td[2]')[0].text_content()
+    response = root.get(link, params=params)
+    log = html.fromstring(response).xpath('/html/body/table/tbody/tr/td[2]')[0].text_content()
   except Exception, e:
     log = _('Failed to retrieve log: %s') % e
 
@@ -270,7 +279,7 @@ def job_single_logs(request, job):
     if recent_tasks:
       task = recent_tasks[0]
 
-  if task is None:
+  if task is None or not task.taskAttemptIds:
     raise PopupException(_("No tasks found for job %(id)s.") % {'id': job.jobId})
 
   return single_task_attempt_logs(request, **{'job': job.jobId, 'taskid': task.taskId, 'attemptid': task.taskAttemptIds[-1]})

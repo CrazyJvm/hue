@@ -25,7 +25,6 @@ from desktop.lib.conf import ConfigSection, Config, coerce_bool
 from beeswax.settings import NICE_NAME
 
 
-
 HIVE_SERVER_HOST = Config(
   key="hive_server_host",
   help=_t("Host where HiveServer2 server is running. If Kerberos security is enabled, "
@@ -65,6 +64,20 @@ BROWSE_PARTITIONED_TABLE_LIMIT = Config(
   default=250,
   type=int,
   help=_t('Set a LIMIT clause when browsing a partitioned table. A positive value will be set as the LIMIT. If 0 or negative, do not set any limit.'))
+
+DOWNLOAD_ROW_LIMIT = Config(
+  key='download_row_limit',
+  default=1000000,
+  type=int,
+  help=_t('A limit to the number of rows that can be downloaded from a query. A value of -1 means there will be no limit. A maximum of 65,000 is applied to XLS downloads.'))
+
+CLOSE_QUERIES = Config(
+  key="close_queries",
+  help=_t("Hue will try to close the Hive query when the user leaves the editor page. "
+          "This will free all the query resources in HiveServer2, but also make its results inaccessible."),
+  type=coerce_bool,
+  default=False
+)
 
 SSL = ConfigSection(
   key='ssl',
@@ -119,5 +132,13 @@ def config_validator(user):
       server.get_databases()
   except:
     res.append((NICE_NAME, _("The application won't work without a running HiveServer2.")))
+
+  try:
+    from hadoop import cluster
+    warehouse = '/user/hive/warehouse'
+    fs = cluster.get_hdfs()
+    fs.stats(warehouse)
+  except Exception:
+    return [(NICE_NAME, _('Failed to access Hive warehouse: %s') % warehouse)]
 
   return res

@@ -180,8 +180,8 @@ ${ layout.menubar(section='bundles') }
     function toggleActions() {
       $(".toolbarBtn").attr("disabled", "disabled");
       var selector = $(".hueCheckbox[checked='checked']");
-      var can_modify = $(".hueCheckbox[checked='checked'][data-bundle-id]");
-      if (can_modify.length >= 1 && can_modify.length == selector.length) {
+      var can_write = $(".hueCheckbox[checked='checked'][data-bundle-id]");
+      if (can_write.length >= 1 && can_write.length == selector.length) {
         $("#destroy-btn").removeAttr("disabled");
         $("#restore-btn").removeAttr("disabled");
       }
@@ -241,6 +241,9 @@ ${ layout.menubar(section='bundles') }
           "sNext":"${_('Next')}",
           "sPrevious":"${_('Previous')}"
         }
+      },
+      "fnDrawCallback":function (oSettings) {
+        $("a[data-row-selector='true']").jHueRowSelector();
       }
     });
 

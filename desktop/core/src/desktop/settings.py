@@ -24,10 +24,12 @@ import logging
 import os
 import sys
 import pkg_resources
+from guppy import hpy
 
 import desktop.conf
 import desktop.log
 from desktop.lib.paths import get_desktop_root
+from desktop.lib.python_util import force_dict_to_strings
 
 
 HUE_DESKTOP_VERSION = pkg_resources.get_distribution("desktop").version or "Unknown"
@@ -96,6 +98,9 @@ MEDIA_URL = ''
 # Additional locations of static files
 STATICFILES_DIRS = ()
 
+# For Django admin interface
+STATIC_URL = '/static/'
+
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
   'django.template.loaders.filesystem.Loader',
@@ -106,11 +111,12 @@ MIDDLEWARE_CLASSES = [
     # The order matters
     'desktop.middleware.EnsureSafeMethodMiddleware',
     'desktop.middleware.DatabaseLoggingMiddleware',
+    'desktop.middleware.AuditLoggingMiddleware',
     'django.middleware.common.CommonMiddleware',
     'desktop.middleware.SessionOverPostMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'desktop.middleware.SpnegoMiddleware',
+    'desktop.middleware.SpnegoMiddleware',    
     'desktop.middleware.HueRemoteUserMiddleware',
     'django.middleware.locale.LocaleMiddleware',
     'babeldjango.middleware.LocaleMiddleware',
@@ -208,9 +214,13 @@ appmanager.load_libs()
 _lib_conf_modules = [dict(module=app.conf, config_key=None) for app in appmanager.DESKTOP_LIBS if app.conf is not None]
 LOCALE_PATHS.extend([app.locale_path for app in appmanager.DESKTOP_LIBS])
 
+# Load desktop config
+_desktop_conf_modules = [dict(module=desktop.conf, config_key=None)]
+conf.initialize(_desktop_conf_modules, _config_dir)
+
 # Activate l10n
 # Install apps
-appmanager.load_apps()
+appmanager.load_apps(desktop.conf.APP_BLACKLIST.get())
 for app in appmanager.DESKTOP_APPS:
   INSTALLED_APPS.extend(app.django_apps)
   LOCALE_PATHS.append(app.locale_path)
@@ -220,7 +230,6 @@ logging.debug("Installed Django modules: %s" % ",".join(map(str, appmanager.DESK
 
 # Load app configuration
 _app_conf_modules = [dict(module=app.conf, config_key=app.config_key) for app in appmanager.DESKTOP_APPS if app.conf is not None]
-_app_conf_modules.append(dict(module=desktop.conf, config_key=None))
 
 conf.initialize(_lib_conf_modules, _config_dir)
 conf.initialize(_app_conf_modules, _config_dir)
@@ -264,7 +273,7 @@ else:
     "PASSWORD" : desktop.conf.DATABASE.PASSWORD.get(),
     "HOST" : desktop.conf.DATABASE.HOST.get(),
     "PORT" : str(desktop.conf.DATABASE.PORT.get()),
-    "OPTIONS": desktop.conf.DATABASE.OPTIONS.get(),
+    "OPTIONS": force_dict_to_strings(desktop.conf.DATABASE.OPTIONS.get()),
     # DB used for tests
     "TEST_NAME" : get_desktop_root('desktop-test.db')
   }
@@ -291,6 +300,8 @@ if 'test' in sys.argv:
 TIME_ZONE = desktop.conf.TIME_ZONE.get()
 # Desktop supports only one authentication backend.
 AUTHENTICATION_BACKENDS = (desktop.conf.AUTH.BACKEND.get(),)
+if desktop.conf.DEMO_ENABLED.get():
+  AUTHENTICATION_BACKENDS = ('desktop.auth.backend.DemoBackend',)
 
 EMAIL_HOST = desktop.conf.SMTP.HOST.get()
 EMAIL_PORT = desktop.conf.SMTP.PORT.get()
@@ -324,9 +335,20 @@ if OPENID_AUTHENTICATION:
   LOGIN_URL = '/openid/login'
   SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 
+# OAuth
+OAUTH_AUTHENTICATION='liboauth.backend.OAuthBackend' in AUTHENTICATION_BACKENDS
+if OAUTH_AUTHENTICATION:
+    INSTALLED_APPS.append('liboauth')
+    LOGIN_URL = '/oauth/accounts/login'
+    SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
 # URL Redirection white list.
 if desktop.conf.REDIRECT_WHITELIST.get():
   MIDDLEWARE_CLASSES.append('desktop.middleware.EnsureSafeRedirectURLMiddleware')
+
+#Support HTTPS load-balancing
+if desktop.conf.SECURE_PROXY_SSL_HEADER.get():
+  SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'https')
 
 ############################################################
 
@@ -336,3 +358,8 @@ SKIP_SOUTH_TESTS = True
 # Set up environment variable so Kerberos libraries look at our private
 # ticket cache
 os.environ['KRB5CCNAME'] = desktop.conf.KERBEROS.CCACHE_PATH.get()
+
+# Memory
+if desktop.conf.MEMORY_PROFILER.get():
+  MEMORY_PROFILER = hpy()
+  MEMORY_PROFILER.setrelheap()

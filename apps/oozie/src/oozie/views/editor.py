@@ -43,6 +43,7 @@ from liboozie.submittion import Submission
 from filebrowser.lib.archives import archive_factory
 from oozie.decorators import check_job_access_permission, check_job_edition_permission,\
                              check_dataset_access_permission, check_dataset_edition_permission
+from oozie.conf import ENABLE_CRON_SCHEDULING
 from oozie.importlib.workflows import import_workflow as _import_workflow
 from oozie.importlib.coordinators import import_coordinator as _import_coordinator
 from oozie.management.commands import oozie_setup
@@ -383,11 +384,16 @@ def create_coordinator(request, workflow=None):
   else:
     coordinator = Coordinator(owner=request.user, schema_version="uri:oozie:coordinator:0.2")
 
+  enable_cron_scheduling = ENABLE_CRON_SCHEDULING.get()
+
   if request.method == 'POST':
     coordinator_form = CoordinatorForm(request.POST, instance=coordinator, user=request.user)
 
     if coordinator_form.is_valid():
       coordinator = coordinator_form.save()
+      if enable_cron_scheduling:
+        coordinator.cron_frequency = {'frequency': request.POST.get('cron_frequency'), 'isAdvancedCron': request.POST.get('isAdvancedCron') == 'on'}
+      coordinator.save()
       Document.objects.link(coordinator, owner=coordinator.owner, name=coordinator.name, description=coordinator.description)
       return redirect(reverse('oozie:edit_coordinator', kwargs={'coordinator': coordinator.id}) + "#step3")
     else:
@@ -398,6 +404,8 @@ def create_coordinator(request, workflow=None):
   return render('editor/create_coordinator.mako', request, {
     'coordinator': coordinator,
     'coordinator_form': coordinator_form,
+    'coordinator_frequency': json.dumps(coordinator.cron_frequency),
+    'enable_cron_scheduling': enable_cron_scheduling,
   })
 
 
@@ -459,6 +467,8 @@ def edit_coordinator(request, coordinator):
   NewDataOutputFormSet = inlineformset_factory(Coordinator, DataOutput, form=DataOutputForm, extra=0, can_order=False, can_delete=False)
   NewDataOutputFormSet.form = staticmethod(curry(DataOutputForm, coordinator=coordinator))
 
+  enable_cron_scheduling = ENABLE_CRON_SCHEDULING.get()
+
   if request.method == 'POST':
     coordinator_form = CoordinatorForm(request.POST, instance=coordinator, user=request.user)
     dataset_formset = DatasetFormSet(request.POST, request.FILES, instance=coordinator)
@@ -475,8 +485,9 @@ def edit_coordinator(request, coordinator):
       data_output_formset.save()
       new_data_input_formset.save()
       new_data_output_formset.save()
-
       coordinator.sla = json.loads(request.POST.get('sla'))
+      if enable_cron_scheduling:
+        coordinator.cron_frequency = {'frequency': request.POST.get('cron_frequency'), 'isAdvancedCron': request.POST.get('isAdvancedCron') == 'on'}
       coordinator.save()
 
       request.info(_('Coordinator saved.'))
@@ -499,7 +510,9 @@ def edit_coordinator(request, coordinator):
     'dataset_form': dataset_form,
     'new_data_input_formset': new_data_input_formset,
     'new_data_output_formset': new_data_output_formset,
-    'history': history
+    'history': history,
+    'coordinator_frequency': json.dumps(coordinator.cron_frequency),
+    'enable_cron_scheduling': enable_cron_scheduling,
   })
 
 

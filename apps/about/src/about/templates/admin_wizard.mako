@@ -16,6 +16,7 @@
 
 <%!
 from desktop.views import commonheader, commonfooter
+from django.core.urlresolvers import reverse
 from django.utils.encoding import smart_unicode
 from django.utils.translation import ugettext as _
 %>
@@ -47,8 +48,7 @@ ${ header.menubar() }
                   class="fa fa-cogs"></i> ${ _('Check Configuration') }</a></li>
               <li><a href="#step2" class="step">${ _('Step 2:') } <i class="fa fa-book"></i> ${ _('Examples') }</a></li>
               <li><a href="#step3" class="step">${ _('Step 3:') } <i class="fa fa-group"></i> ${ _('Users') }</a></li>
-              <li><a id="lastStep" href="#step4" class="step">${ _('Step 4:') } <i class="fa fa-flag"></i> ${_('Go!') }
-              </a></li>
+              <li><a id="lastStep" href="#step4" class="step">${ _('Step 4:') } <i class="fa fa-flag"></i> ${_('Go!') }</a></li>
             </ul>
 
           <div class="steps">
@@ -58,8 +58,11 @@ ${ header.menubar() }
 
               <div class="card-body">
                 <div id="check-config-section" style="margin-bottom:20px">
-                  <!--[if !IE]><!--><i class="fa fa-spinner fa-spin" style="font-size: 60px; color: #DDD"></i><!--<![endif]-->
-                  <!--[if IE]><img src="/static/art/spinner.gif" /><![endif]-->
+                  <div class="spinner">
+                    <!--[if !IE]> --><i class="fa fa-spinner fa-spin" style="font-size: 60px; color: #DDD"></i><!-- <![endif]-->
+                    <!--[if IE]><img src="/static/art/spinner.gif" /><![endif]-->
+                  </div>
+                  <div class="info hide"></div>
                 </div>
               </div>
             </div>
@@ -104,11 +107,11 @@ ${ header.menubar() }
                 </a>
               </li>
           % endif
-          % if 'jobsub' in app_names:
+          % if 'search' in app_names:
               <li>
                 <a href="#" class="installBtn" data-loading-text="${ _('Installing...') }"
-                   data-sample-url="${ url('oozie:install_examples') }">
-                  <i class="fa fa-download"></i> ${ apps['jobsub'].nice_name }
+                   data-sample-url="${ url('search:install_examples') }">
+                  <i class="fa fa-download"></i> ${ apps['search'].nice_name }
                 </a>
               </li>
           % endif
@@ -120,11 +123,27 @@ ${ header.menubar() }
                 </a>
               </li>
           % endif
+          % if 'hbase' in app_names:
+              <li>
+                <a href="#" class="installBtn" data-loading-text="${ _('Installing...') }"
+                   data-sample-url="${ url('hbase:install_examples') }">
+                  <i class="fa fa-download"></i> ${ apps['hbase'].nice_name }
+                </a>
+              </li>
+          % endif
           % if 'pig' in app_names:
               <li>
                 <a href="#" class="installBtn" data-loading-text="${ _('Installing...') }"
                    data-sample-url="${ url('pig:install_examples') }">
                   <i class="fa fa-download"></i> ${ apps['pig'].nice_name }
+                </a>
+              </li>
+          % endif
+          % if 'jobsub' in app_names:
+              <li>
+                <a href="#" class="installBtn" data-loading-text="${ _('Installing...') }"
+                   data-sample-url="${ url('oozie:install_examples') }">
+                  <i class="fa fa-download"></i> ${ apps['jobsub'].nice_name }
                 </a>
               </li>
           % endif
@@ -220,10 +239,16 @@ ${ header.menubar() }
         <div class="pull-right muted">${ _('Hue and the Hue logo are trademarks of Cloudera, Inc.') }</div>
       </div>
       % else:
+       <div class="card-body">
         <p>
-        </br>
-        &nbsp;&nbsp;&nbsp;${ _('Learn more about Hue and Hadoop on') } <a href="http://gethue.com" target="_blank">http://gethue.com</a>
+          ${ _('Learn more about Hue and Hadoop on') } <a href="http://gethue.com" target="_blank">http://gethue.com</a>.
+          <span class="muted">${ _('Hue and the Hue logo are trademarks of Cloudera, Inc.') }</span>
+          % if not user.is_authenticated():
+            <br/>
+            <a href="${ reverse('desktop.auth.views.dt_login') }" class="btn btn-primary" style="margin-top: 50px;margin-bottom: 20px"><i class="fa fa-sign-in"></i> ${ _('Sign in now!') }</a>
+          % endif
         </p>
+       </div>
       % endif
 
     </div>
@@ -260,10 +285,16 @@ ${ header.menubar() }
 <script src="/static/ext/js/routie-0.3.0.min.js" type="text/javascript" charset="utf-8"></script>
 
 <script type="text/javascript" charset="utf-8">
+
 $(document).ready(function(){
 
   $.get("${ url('desktop.views.check_config') }", function(response) {
-    $("#check-config-section").html(response);
+    $("#check-config-section .spinner").css({
+      'position': 'absolute',
+      'top': '-100px'
+    });
+    $("#check-config-section .info").html(response);
+    $("#check-config-section .info").removeClass('hide');
   })
   .fail(function() { $(document).trigger('error', '${ _("Check config failed: ")}'); });
 

@@ -91,7 +91,7 @@ ${ commonheader(_('Query'), app_name, user) | n,unicode }
 
               <div data-bind="css: {'hide': query.errors().length == 0}" class="hide alert alert-error">
                 <p><strong>${_('Your query has the following error(s):')}</strong></p>
-                <div data-bind="foreach: query.errors">
+                <div data-bind="foreach: { 'data': query.errors, 'afterRender': resizeTable }">
                   <p data-bind="text: $data" class="queryErrorMessage"></p>
                 </div>
               </div>
@@ -114,7 +114,7 @@ ${ commonheader(_('Query'), app_name, user) | n,unicode }
     </div>
     <div data-bind="css: {'hide': rows().length == 0}" class="hide">
       <div class="card card-small scrollable">
-        <table class="table table-striped table-condensed resultTable" cellpadding="0" cellspacing="0" data-tablescroller-min-height-disable="true" data-tablescroller-enforce-height="true">
+        <table id="resultTable" class="table table-striped table-condensed resultTable" cellpadding="0" cellspacing="0" data-tablescroller-min-height-disable="true" data-tablescroller-enforce-height="true">
           <thead>
             <tr data-bind="foreach: columns">
               <th data-bind="text: $data"></th>
@@ -336,17 +336,13 @@ ${ commonheader(_('Query'), app_name, user) | n,unicode }
       placement: 'bottom'
     });
 
-    var navigatorSearchTimeout = -1;
-    $("#navigatorSearch").on("keyup", function () {
-      window.clearTimeout(navigatorSearchTimeout);
-      navigatorSearchTimeout = window.setTimeout(function () {
-        $("#navigatorTables li").removeClass("hide");
-        $("#navigatorTables li").each(function () {
-          if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
-            $(this).addClass("hide");
-          }
-        });
-      }, 300);
+    $("#navigatorSearch").jHueDelayedInput(function(){
+      $("#navigatorTables li").removeClass("hide");
+      $("#navigatorTables li").each(function () {
+        if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
+          $(this).addClass("hide");
+        }
+      });
     });
 
     $("#navigatorTables").css("max-height", ($(window).height() - 340) + "px").css("overflow-y", "auto");
@@ -652,8 +648,7 @@ ${ commonheader(_('Query'), app_name, user) | n,unicode }
       }
     }
   })());
-  viewModel.query.errors.subscribe(function() {
-    // Ensure table headers are in right place when query errors exist.
+  function resizeTable() {
     $(".resultTable").jHueTableExtender({
       hintElement: "#jumpToColumnAlert",
       fixedHeader: true,
@@ -661,7 +656,7 @@ ${ commonheader(_('Query'), app_name, user) | n,unicode }
     });
 
     $("#executeQuery").button("reset");
-  });
+  }
   ko.applyBindings(viewModel);
 
   function resetNavigator() {

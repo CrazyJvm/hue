@@ -50,17 +50,20 @@ function BeeswaxViewModel(server) {
       'rows': [],
       'columns': [],
       'empty': true,
+      'expired': false,
       'explanation': null,
       'url': null,
       'errors': [],
       'save': {
         'errors': null,
-        'type': 'hive-table',
-        'path': null
+        'type': 'hdfs-file',
+        'path': null,
+        'overwrite': true
       }
     },
     'watch': {
       'logs': [],
+      'jobUrls': [],
       'url': null,
       'errors': []
     },
@@ -69,11 +72,19 @@ function BeeswaxViewModel(server) {
     'isFinished': true
   };
 
+  self.design = ko.mapping.fromJS(DESIGN_DEFAULTS);
+
   self.server = ko.observable(server);
   self.databases = ko.observableArray();
   self.selectedDatabase = ko.observable(0);
   self.isReady = ko.observable(false);
-  self.design = ko.mapping.fromJS(DESIGN_DEFAULTS);
+  // Use a view model attribute so that we don't have to override KO.
+  // This allows Hue to disable the execute button until the query placeholder dies.
+  self.queryEditorBlank = ko.observable(false);
+
+  self.canExecute = ko.computed(function() {
+    return !self.design.isRunning() && self.design.isFinished();
+  });
 
   self.hasMoreResults = ko.computed(function() {
     return self.design.results.url() != null;
@@ -89,6 +100,10 @@ function BeeswaxViewModel(server) {
 
   self.design.results.save.targetDirectoryError = ko.computed(function() {
     return (self.design.results.save.errors() && 'target_dir' in self.design.results.save.errors()) ? self.design.results.save.errors()['target_dir'] : null;
+  });
+
+  self.design.results.save.targetFileError = ko.computed(function() {
+    return (self.design.results.save.errors() && 'target_file' in self.design.results.save.errors()) ? self.design.results.save.errors()['target_file'] : null;
   });
 
   self.database = ko.computed({
@@ -117,6 +132,10 @@ function BeeswaxViewModel(server) {
     return ! hasBlank;
   });
 
+  self.hasResults = ko.computed(function() {
+    return !self.design.results.empty() && !self.design.results.expired();
+  });
+
   self.resetQuery = function() {
     ko.mapping.fromJS(QUERY_DEFAULTS, self.design);
   };
@@ -131,7 +150,9 @@ function BeeswaxViewModel(server) {
 
   self.setErrors = function(message, errors) {
     self.resetErrors();
-    self.design.errors.push(message);
+    if (message) {
+      self.design.errors.push(message);
+    }
     if (errors) {
       self.design.query.errors.push.apply(self.design.query.errors, errors.query);
       self.design.settings.errors.push.apply(self.design.settings.errors, errors.settings);
@@ -141,7 +162,13 @@ function BeeswaxViewModel(server) {
   };
 
   self.updateDatabases = function(databases) {
-    self.databases(databases);
+    if (databases) {
+      var i = databases.indexOf("_impala_builtins"); // Blacklist of system databases
+      if (i != -1) {
+        databases.splice(i, 1);
+      }
+      self.databases(databases);
+    }
   };
 
   self.updateDesign = function(design) {
@@ -161,7 +188,7 @@ function BeeswaxViewModel(server) {
       self.addSetting(setting.key, setting.value);
     });
     $.each(design.file_resources, function(index, file_resource) {
-      self.addFileResources(file_resource.type, file_resource.path);
+      self.addFileResource(file_resource.type, file_resource.path);
     });
     $.each(design.functions, function(index, _function) {
       self.addFunction(_function.name, _function.class_name);
@@ -170,8 +197,8 @@ function BeeswaxViewModel(server) {
 
   self.updateHistory = function(history) {
     self.design.history.id(history.id);
-    viewModel.design.results.url('/' + viewModel.server() + '/results/' + history.id + '/0?format=json');
-    viewModel.design.watch.url('/' + viewModel.server() + '/api/watch/json/' + history.id);
+    self.design.results.url('/' + self.server() + '/results/' + history.id + '/0?format=json');
+    self.design.watch.url('/' + self.server() + '/api/watch/json/' + history.id);
     if (history.design) {
       self.updateDesign(history.design);
     }
@@ -238,18 +265,6 @@ function BeeswaxViewModel(server) {
     self.design.fileResources.values.splice(index, 1);
   };
 
-  self.getFileResourceTypeErrors = function(index) {
-    if (self.design.settings.errors() && self.design.settings.errors()[index]) {
-      return self.design.settings.errors()[index];
-    } else {
-      return {};
-    }
-  };
-
-  self.getFileResourcePathErrors = function(index) {
-    
-  };
-
   self.addFunction = function(name, class_name) {
     var obj = {
       'name': ko.observable(name),
@@ -266,14 +281,6 @@ function BeeswaxViewModel(server) {
 
   self.removeFunction = function(index) {
     self.design.functions.values.splice(index, 1);
-  };
-
-  self.getFunctionErrors = function(index) {
-    if (self.design.settings.errors() && self.design.settings.errors()[index]) {
-      return self.design.settings.errors()[index];
-    } else {
-      return {};
-    }
   };
 
   var advancedErrorHandling = function(advanced_parameter, key) {
@@ -360,8 +367,10 @@ function BeeswaxViewModel(server) {
       type: 'GET',
       success: function(data) {
         self.updateDatabases(data.databases);
+        $(document).trigger('fetched.databases', [data]);
       },
-      error: error_fn
+      error: error_fn,
+      cache: false
     };
     $.ajax(request);
   };
@@ -375,9 +384,11 @@ function BeeswaxViewModel(server) {
       type: 'GET',
       success: function(data) {
         self.updateDesign(data.design);
-        $(document).trigger('fetched.design', data);
+        self.database(data.design.database);
+        $(document).trigger('fetched.design', [data]);
       },
-      error: error_fn
+      error: error_fn,
+      cache: false
     };
     $.ajax(request);
   };
@@ -391,9 +402,11 @@ function BeeswaxViewModel(server) {
       type: 'GET',
       success: function(data) {
         self.updateHistory(data.query_history);
-        $(document).trigger('fetched.query', data);
+        self.database(data.query_history.database);
+        $(document).trigger('fetched.query', [data]);
       },
-      error: error_fn
+      error: error_fn,
+      cache: false
     };
     $.ajax(request);
   };
@@ -420,7 +433,8 @@ function BeeswaxViewModel(server) {
         $(document).trigger('fetched.parameters');
       },
       error: error_fn,
-      data: data
+      data: data,
+      cache: false
     };
     $.ajax(request);
   };
@@ -430,6 +444,8 @@ function BeeswaxViewModel(server) {
     self.design.explain(true);
     self.design.isRunning(true);
     self.design.isFinished(true);
+    self.design.results.expired(false);
+    self.design.results.empty(false);
     self.resetErrors();
 
     var data = {
@@ -448,6 +464,8 @@ function BeeswaxViewModel(server) {
       success: function(data) {
         if (data.status == 0) {
           self.design.watch.logs.removeAll();
+          self.design.watch.jobUrls.removeAll();
+          self.design.statement(data.statement);
           self.design.results.rows.removeAll();
           self.design.results.columns.removeAll();
           self.design.results.explanation(data.explanation);
@@ -459,7 +477,8 @@ function BeeswaxViewModel(server) {
         self.design.isRunning(false);
       },
       error: error_fn,
-      data: data
+      data: data,
+      cache: false
     };
     $.ajax(request);
   };
@@ -469,6 +488,8 @@ function BeeswaxViewModel(server) {
     self.design.explain(false);
     self.design.isRunning(true);
     self.design.isFinished(true);
+    self.design.results.expired(false);
+    self.design.results.empty(false);
     self.resetErrors();
 
     var data = {
@@ -490,21 +511,23 @@ function BeeswaxViewModel(server) {
       type: 'POST',
       success: function(data) {
         self.design.errors.removeAll();
+        self.design.watch.errors.removeAll();
         if (data.status == 0) {
           self.design.results.url('/' + self.server() + '/results/' + data.id + '/0?format=json');
           self.design.watch.url(data.watch_url);
           self.design.statement(data.statement);
           self.design.history.id(data.id);
           self.watchQueryLoop();
+          $(document).trigger('executed.query', data);
         } else {
           self.setErrors(data.message, data.errors);
           self.design.isRunning(false);
           $(document).trigger('error.query');
         }
-        $(document).trigger('executed.query', data);
       },
       error: error_fn,
-      data: data
+      data: data,
+      cache: false
     };
     $.ajax(request);
   };
@@ -517,23 +540,32 @@ function BeeswaxViewModel(server) {
     self.resetErrors();
 
     var data = {
-      'next': true
+      'next': true,
+      'query-query': self.design.query.value(),
     };
     var request = {
       url: self.design.watch.url(),
       dataType: 'json',
       type: 'POST',
       success: function(data) {
-        self.design.errors.removeAll();
-        self.design.watch.logs.removeAll();
-        self.design.statement(data.statement);
-        self.design.watch.url(data.watch_url);
-        self.design.results.url('/' + self.server() + '/results/' + data.id + '/0?format=json');
-        self.watchQueryLoop();
-        $(document).trigger('executed.query', data);
+        if (data.status == 0) {
+          self.design.watch.logs.removeAll();
+          self.design.watch.jobUrls.removeAll();
+          self.design.statement(data.statement);
+          self.design.watch.url(data.watch_url);
+          self.design.results.url('/' + self.server() + '/results/' + data.id + '/0?format=json');
+          self.watchQueryLoop();
+          $(document).trigger('executed.query', data);
+        } else {
+          self.setErrors(data.message, data.errors);
+          self.design.isRunning(false);
+          self.design.isFinished(false); // We propose to skip the failed statement
+          $(document).trigger('error.query');
+        }
       },
       error: error_fn,
-      data: data
+      data: data,
+      cache: false
     };
     $.ajax(request);
   };
@@ -564,16 +596,19 @@ function BeeswaxViewModel(server) {
           $(document).trigger('server.unmanageable_error', jqXHR.responseText);
         }
       },
-      data: data
+      data: data,
+      cache: false
     };
     $.ajax(request);
   };
 
   self.watchQueryLoop = function(fn) {
-    var TIMEOUT = 1000;
+    var TIMEOUT = 100;
     var timer = null;
 
+    self.design.isRunning(true);
     self.design.watch.logs.removeAll();
+    self.design.watch.jobUrls.removeAll();
     self.design.results.rows.removeAll();
     self.design.results.columns.removeAll();
     self.resetErrors();
@@ -584,10 +619,10 @@ function BeeswaxViewModel(server) {
         if (data.isSuccess || failed) {
           clearTimeout(timer);
           self.design.isRunning(false);
-
           if (data.log) {
-            self.design.watch.logs.push(data.log);
+            self.design.watch.logs(data.log.split("\n"));
             // scroll logs
+            self.design.watch.jobUrls(data.jobUrls);
           }
           if (!failed) {
             $(document).trigger('stop_watch.query');
@@ -601,10 +636,12 @@ function BeeswaxViewModel(server) {
         } else {
           self.design.statement(data.statement); // In case new no result statement executed
           if (data.log) {
-            self.design.watch.logs.push(data.log);
+            self.design.watch.logs(data.log.split("\n"));
             // scroll logs
+            self.design.watch.jobUrls(data.jobUrls);
           }
 
+          TIMEOUT = Math.min(TIMEOUT + 100, 2000);
           timer = setTimeout(_fn, TIMEOUT);
         }
       });
@@ -616,6 +653,7 @@ function BeeswaxViewModel(server) {
 
   self.fetchResults = function() {
     $(document).trigger('fetch.results');
+    self.design.errors.removeAll();
     self.design.results.errors.removeAll();
     var request = {
       url: self.design.results.url(),
@@ -630,7 +668,10 @@ function BeeswaxViewModel(server) {
           self.design.isRunning(false);
           self.design.isFinished(data.is_finished);
           if (self.design.results.columns().length == 0){
-            self.design.results.columns(data.columns);
+            if (data.columns != null){
+              data.columns.unshift({ type:"INT_TYPE", name:"", comment:null});
+            }
+            self.design.results.columns(data.columns ? data.columns : []); // Some querysets have empty or null for columns
           }
           self.design.results.rows.push.apply(self.design.results.rows, data.results);
           self.design.results.empty(self.design.results.rows().length == 0);
@@ -642,7 +683,8 @@ function BeeswaxViewModel(server) {
         }
         $(document).trigger('fetched.results', [data]);
       },
-      error: error_fn
+      error: error_fn,
+      cache: false
     };
     $.ajax(request);
   };
@@ -673,35 +715,43 @@ function BeeswaxViewModel(server) {
         dataType: 'json',
         type: 'POST',
         success: function(data) {
-          self.design.id(data.design_id);
-          $(document).trigger('saved.design', [data.design_id]);
+          if (data.status == 0) {
+            self.design.id(data.design_id);
+            $(document).trigger('saved.design', [data.design_id]);
+          } else {
+            self.setErrors("", data.errors);
+            $(document).trigger('error_save.design', [data.message]);
+          }
         },
         error: function() {
           $(document).trigger('error_save.design');
         },
-        data: data
+        data: data,
+        cache: false
       };
       $.ajax(request);
     }
   };
 
   self.cancelQuery = function() {
-    $(document).trigger('cancel.query');
-    var url = '/' + self.server() + '/api/query/' + self.design.id() + '/cancel';
-    $.post(url,
-      function(response) {
-        if (response['status'] != 0) {
-          $(document).trigger('error_cancel.query', response['message']);
-        } else {
-          $(document).trigger('cancelled.query');
+    if (self.design.history.id() > 0) {
+      $(document).trigger('cancel.query');
+      var url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/cancel';
+      $.post(url,
+        function(response) {
+          if (response['status'] != 0) {
+            $(document).trigger('error_cancel.query', response['message']);
+          } else {
+            $(document).trigger('cancelled.query');
+          }
         }
-      }
-    );
+      );
+    }
   };
 
   self.closeQuery = function() {
     var self = this;
-    if (self.design.history.id()) {
+    if (self.design.history.id() > 0 && !self.design.isRunning()) {
       var data = {};
       var url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/close';
       var request = {
@@ -720,7 +770,8 @@ function BeeswaxViewModel(server) {
           $(document).trigger('error_close.results');
         },
         data: data,
-        async: false // for multi query
+        async: false, // for multi query
+        cache: false
       };
       $.ajax(request);
     }
@@ -728,14 +779,40 @@ function BeeswaxViewModel(server) {
 
   self.saveResults = function() {
     var self = this;
+
+    self.design.isRunning(true);
+    self.resetErrors();
     if (self.design.id()) {
-      var data = {
-        'database': self.database(),
-        'server': self.server(),
-        'type': self.design.results.save.type(),
-        'path': self.design.results.save.path()
-      };
-      var url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/results/save';
+      var data, url;
+
+      switch(self.design.results.save.type()) {
+        case 'hdfs-directory':
+        data = {
+          'server': self.server(),
+          'path': self.design.results.save.path()
+        };
+        url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/results/save/hdfs/directory';
+        break;
+
+        case 'hdfs-file':
+        data = {
+          'server': self.server(),
+          'path': self.design.results.save.path(),
+          'overwrite': self.design.results.save.overwrite()
+        };
+        url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/results/save/hdfs/file';
+        break;
+
+        // case 'hive-table':
+        default:
+        data = {
+          'database': self.database(),
+          'server': self.server(),
+          'table': self.design.results.save.path()
+        };
+        url = '/' + self.server() + '/api/query/' + self.design.history.id() + '/results/save/hive/table';
+        break;
+      }
       var request = {
         url: url,
         dataType: 'json',
@@ -743,30 +820,37 @@ function BeeswaxViewModel(server) {
         success: function(data) {
           if (data.status == 0) {
             self.design.results.save.errors(null);
+
+            var redirect_fn = function() {
+              window.location.href = data.success_url;
+              self.design.isRunning(false);
+            };
             if (data.id) {
               // watch this ID.
               self.design.watch.url(data.watch_url);
               self.design.watch.logs.removeAll();
-              self.watchQueryLoop(function() {
-                window.location.href = data.success_url;
-              });
+              self.design.watch.jobUrls.removeAll();
+              self.watchQueryLoop(redirect_fn);
             } else {
               // redirect to metastore app.
-              window.location.href = data.success_url;
+              redirect_fn();
             }
             $(document).trigger('saved.results', data);
           } else {
+            self.design.isRunning(false);
             self.design.results.save.errors(data.errors);
-            $(document).trigger('error_save.results');
+            $(document).trigger('error_save.results', [data.message]);
           }
         },
         error: function(data) {
+          self.design.isRunning(false);
           self.design.results.save.errors(data);
-          $(document).trigger('error_save.results');
+          $(document).trigger('error_save.results', [data]);
         },
-        data: data
+        data: data,
+        cache: false
       };
-      $.ajax(request);
+      return $.ajax(request);
     }
   };
 
@@ -803,21 +887,57 @@ function getFileBrowseButton(inputElement) {
   });
 }
 
-function getFileAndFolderBrowseButton(inputElement) {
+function folderChooser(inputElement) {
+  $("#folderchooser").jHueFileChooser({
+    initialPath: inputElement.val(),
+    onFolderChoose:function (folderPath) {
+      inputElement.val(folderPath);
+      inputElement.trigger("change");
+      $("#chooseFolder").modal("hide");
+    },
+    selectFolder: true,
+    createFolder: true,
+    selectFile: false,
+    uploadFile: false
+  });
+  $("#chooseFolder").modal("show");
+}
+
+function getFolderBrowseButton(inputElement) {
   return $("<button>").addClass("btn").addClass("fileChooserBtn").text("..").click(function (e) {
     e.preventDefault();
-    $("#folderchooser").jHueFileChooser({
-      initialPath: inputElement.val(),
-      onFolderChoose:function (folderPath) {
-        inputElement.val(folderPath);
-        inputElement.trigger("change");
-        $("#chooseFolder").modal("hide");
-      },
-      selectFolder: true,
-      createFolder: false,
-      uploadFile:false
-    });
-    $("#chooseFolder").modal("show");
+    folderChooser(inputElement);
+  });
+}
+
+function pathChooser(inputElement) {
+  $("#pathchooser").jHueFileChooser({
+    initialPath: inputElement.val(),
+    onFolderChoose:function (folderPath) {
+      if (folderPath[folderPath.length - 1] != '/') {
+        folderPath += '/';
+      }
+      inputElement.val(folderPath + 'results.csv');
+      inputElement.trigger("change");
+      $("#choosePath").modal("hide");
+    },
+    onFileChoose: function (filePath) {
+      inputElement.val(filePath);
+      inputElement.trigger("change");
+      $("#choosePath").modal("hide");
+    },
+    selectFolder: true,
+    createFolder: true,
+    selectFile: true,
+    uploadFile: false
+  });
+  $("#choosePath").modal("show");
+}
+
+function getPathBrowseButton(inputElement) {
+  return $("<button>").addClass("btn").addClass("fileChooserBtn").text("..").click(function (e) {
+    e.preventDefault();
+    pathChooser(inputElement);
   });
 }
 
@@ -830,4 +950,10 @@ function clickHard(el) {
       clearInterval(timer);
     }
   }, 100);
+}
+
+function logGA(page) {
+  if (typeof trackOnGA == 'function'){
+    trackOnGA('beeswax/' + page);
+  }
 }

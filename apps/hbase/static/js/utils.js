@@ -154,6 +154,19 @@ function launchModal(modal, data) {
   logGA(modal.slice(0, modal.indexOf('_modal') != -1 ? modal.indexOf('_modal') : modal.length));
 }
 
+function editCell($data) {
+  if ($data.parent.canWrite()) {
+    if ($data.value().length > 146) {
+      launchModal('cell_edit_modal',{
+        content: $data,
+        mime: detectMimeType($data.value())
+      });
+    } else {
+      $data.editing(true);
+    }
+  }
+}
+
 function parseXML(xml) {
   var parser, xmlDoc;
   if (window.DOMParser) {
@@ -258,7 +271,7 @@ function logGA(postfix) {
 
 function table_search(value) {
   routie(app.cluster() + '/' + app.views.tabledata.name() +'/query/' + value);
-};
+}
 
 function getEditablePosition(contentEditable, trimWhitespaceNodes) {
   var el = contentEditable;

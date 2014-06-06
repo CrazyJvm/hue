@@ -3,22 +3,22 @@
 Welcome to the repository for Hue
 =================================
 
-`Hue
-<http://gethue.com>`_ is a Web UI and framework for making Hadoop easy to use.
+Hue is an open source Web interface for analyzing data with Apache Hadoop: `gethue.com
+<http://gethue.com>`_ 
 
 .. image:: docs/images/hue-screen.png
 
 It features:
 
       * File Browser for accessing HDFS
-      * Beeswax application for executing Hive queries
-      * Impala App for executing Impala queries
+      * Hive Editor for developing and running Hive queries
+      * Search App for querying, exploring, visualizing data and dashboards with Solr
+      * Impala App for executing interactive SQL queries
       * Spark Editor and Dashboard
       * Pig Editor for submitting Pig scripts
-      * Oozie App for submitting and monitoring workflows, coordinators and bundles
-      * HBase Browser for exploring and modifying HBase tables and data
-      * Table Browser for accessing Hive metadata and HCatalog
-      * Search App for querying Solr and Solr Cloud
+      * Oozie Editor and Dashboard for submitting and monitoring workflows, coordinators and bundles
+      * HBase Browser for visualizing, querying and modifying HBase tables
+      * Metastore Browser for accessing Hive metadata and HCatalog
       * Job Browser for accessing MapReduce jobs (MR1/MR2-YARN)
       * Job Designer for creating MapReduce/Streaming/Java jobs
       * A Sqoop 2 Editor and Dashboard
@@ -150,12 +150,13 @@ namespace.  See ``apps/about/src/about/urls.py`` for an example.
 
 Main Stack
 ==========
+Hue would not be possible without:
 
    * Python 2.6 - 2.7
-   * Django 1.4 https://docs.djangoproject.com/en/1.4/
-   * Mako
-   * jQuery
-   * Bootstrap
+   * Django 1.4 (https://docs.djangoproject.com/en/1.4/)
+   * Knockout.js (http://knockoutjs.com/)
+   * jQuery (http://jquery.com/)
+   * Bootstrap (http://getbootstrap.com/)
 
 
 Community
@@ -170,4 +171,3 @@ License
 Apache License, Version 2.0
 http://www.apache.org/licenses/LICENSE-2.0
 
-.. image:: https://ga-beacon.appspot.com/UA-37637545-2/hue/index?pixel

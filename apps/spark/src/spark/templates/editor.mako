@@ -58,6 +58,7 @@ ${ common.navbar('editor') }
             <button type="button" class="btn btn-primary uploadAppModalBtn">${ _('Upload app') }</button>
             <button type="button" class="btn btn-primary createContextModalBtn">${ _('Create context') }</button>
           </span>
+          <div></div><!-- this is to fix IE's quirkiness /-->
           <form class="form-inline">
             <span class="dropdown">
               ${_('App name')}&nbsp;
@@ -169,7 +170,7 @@ ${ common.navbar('editor') }
         </div>
           <div data-bind="css: {'hide': rows().length == 0}" class="hide">
             <div class="scrollable">
-              <table class="table table-striped table-condensed resultTable" cellpadding="0" cellspacing="0" data-tablescroller-min-height-disable="true" data-tablescroller-enforce-height="true">
+              <table id="resultTable" class="table table-striped table-condensed resultTable" cellpadding="0" cellspacing="0" data-tablescroller-min-height-disable="true" data-tablescroller-enforce-height="true">
                 <thead>
                   <tr>
                     <th>${ _('Key') }</th>
@@ -180,7 +181,7 @@ ${ common.navbar('editor') }
             </div>
           </div>
 
-          <div data-bind="css: {'hide': !resultsEmpty()}" class="hide">
+          <div data-bind="visible: resultsEmpty()">
             <div class="scrollable">
               <div class="row-fluid">
                 <div class="span10 offset1 center empty-wrapper">
@@ -499,6 +500,10 @@ ${ common.createContextModal() }
     $.jHueNotify.info("${_('Application saved successfully!')}")
   });
 
+  $(document).on('savedas.query', function() {
+    window.location.href = "${ url('spark:editor') }" + viewModel.query.id();
+  });
+
   var dataTable = null;
 
   function cleanResultsTable() {
@@ -560,6 +565,7 @@ ${ common.createContextModal() }
     $("#executeQuery").button("loading");
     cleanResultsTable();
   });
+
   $(document).on('executed.query', function() {
     $('#wait-info').hide();
     $("#executeQuery").button("reset");
@@ -578,6 +584,7 @@ ${ common.createContextModal() }
   $(document).on('server.error', function(e, data) {
     $(document).trigger('error', "${_('Server error occured: ')}" + data.error);
   });
+
   $(document).on('server.unmanageable_error', function(e, responseText) {
     $(document).trigger('error', "${_('Unmanageable server error occured: ')}" + responseText);
   });

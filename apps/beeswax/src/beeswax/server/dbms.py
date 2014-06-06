@@ -16,10 +16,10 @@
 # limitations under the License.
 
 import logging
+import threading
 import time
 
 from django.core.urlresolvers import reverse
-from django.shortcuts import redirect
 from django.utils.encoding import force_unicode
 from django.utils.translation import ugettext as _
 
@@ -27,7 +27,7 @@ from beeswax import hive_site
 from beeswax.conf import HIVE_SERVER_HOST, HIVE_SERVER_PORT,\
   BROWSE_PARTITIONED_TABLE_LIMIT
 from beeswax.design import hql_query
-from beeswax.models import QueryHistory, HIVE_SERVER2, BEESWAX
+from beeswax.models import QueryHistory, HIVE_SERVER2, BEESWAX, QUERY_TYPES
 
 from filebrowser.views import location_to_url
 from desktop.lib.django_util import format_preserving_redirect
@@ -36,28 +36,44 @@ from desktop.lib.exceptions_renderable import PopupException
 
 LOG = logging.getLogger(__name__)
 
+DBMS_CACHE = {}
+DBMS_CACHE_LOCK = threading.Lock()
+
 
 def get(user, query_server=None):
+  global DBMS_CACHE
+  global DBMS_CACHE_LOCK
+
   # Avoid circular dependency
   from beeswax.server.hive_server2_lib import HiveServerClientCompatible, HiveServerClient
 
   if query_server is None:
     query_server = get_query_server_config()
 
-  return HiveServer2Dbms(HiveServerClientCompatible(HiveServerClient(query_server, user)), QueryHistory.SERVER_TYPE[1][0])
+  DBMS_CACHE_LOCK.acquire()
+  try:
+    DBMS_CACHE.setdefault(user.username, {})
+
+    if query_server['server_name'] not in DBMS_CACHE[user.username]:
+      DBMS_CACHE[user.username][query_server['server_name']] = HiveServer2Dbms(HiveServerClientCompatible(HiveServerClient(query_server, user)), QueryHistory.SERVER_TYPE[1][0])
+
+    return DBMS_CACHE[user.username][query_server['server_name']]
+  finally:
+    DBMS_CACHE_LOCK.release()
 
 
 def get_query_server_config(name='beeswax', server=None):
   if name == 'impala':
     from impala.conf import SERVER_HOST as IMPALA_SERVER_HOST, SERVER_PORT as IMPALA_SERVER_PORT, \
-        IMPALA_PRINCIPAL, IMPERSONATION_ENABLED
+        IMPALA_PRINCIPAL, IMPERSONATION_ENABLED, QUERYCACHE_ROWS
 
     query_server = {
         'server_name': 'impala',
         'server_host': IMPALA_SERVER_HOST.get(),
         'server_port': IMPALA_SERVER_PORT.get(),
         'principal': IMPALA_PRINCIPAL.get(),
-        'impersonation_enabled': IMPERSONATION_ENABLED.get()
+        'impersonation_enabled': IMPERSONATION_ENABLED.get(),
+        'querycache_rows': QUERYCACHE_ROWS.get()
     }
   else:
     kerberos_principal = hive_site.get_hiveserver2_kerberos_principal(HIVE_SERVER_HOST.get())
@@ -90,6 +106,7 @@ class HiveServer2Dbms(object):
   def __init__(self, client, server_type):
     self.client = client
     self.server_type = server_type
+    self.server_name = self.client.query_server['server_name']
 
   def get_table(self, database, table_name):
     # DB name not supported in SHOW PARTITIONS required in Table
@@ -116,7 +133,10 @@ class HiveServer2Dbms(object):
 
 
   def execute_statement(self, hql):
-    query = hql_query(hql)
+    if self.server_name == 'impala':
+      query = hql_query(hql, QUERY_TYPES[1])
+    else:
+      query = hql_query(hql, QUERY_TYPES[0])
     return self.execute_and_watch(query)
 
 
@@ -139,6 +159,9 @@ class HiveServer2Dbms(object):
   def open_session(self, user):
     return self.client.open_session(user)
 
+  def close_session(self, session):
+    return self.client.close_session(session)
+
   def cancel_operation(self, query_handle):
     resp = self.client.cancel_operation(query_handle)
     if self.client.query_server['server_name'] == 'impala':
@@ -150,20 +173,22 @@ class HiveServer2Dbms(object):
     """No samples if it's a view (HUE-526)"""
     if not table.is_view:
       limit = min(100, BROWSE_PARTITIONED_TABLE_LIMIT.get())
-      hql = "SELECT * FROM `%s.%s` LIMIT %s" % (database, table.name, limit)
+      hql = "SELECT * FROM %s.%s LIMIT %s" % (database, table.name, limit)
       query = hql_query(hql)
       handle = self.execute_and_wait(query, timeout_sec=5.0)
 
       if handle:
-        result = self.fetch(handle)
+        result = self.fetch(handle, rows=100)
         self.close(handle)
         return result
+
 
   def analyze_table_table(self, database, table):
     hql = 'analyze table `%(database)s.%(table_name)` compute statistics' % {'database': database, 'table_name': table.name}
     query = hql_query(hql, database)
 
     return self.execute_query(query)
+
 
   def analyze_table_column(self):
     # analyze table <table_name> partition <part_name> compute statistics for columns <col_name1>, <col_name2>...
@@ -239,7 +264,7 @@ class HiveServer2Dbms(object):
     return self.execute_statement(hql)
 
 
-  def create_table_as_a_select(self, request, query_history, target_table, result_meta):
+  def create_table_as_a_select(self, request, query_history, target_database, target_table, result_meta):
     design = query_history.design.get_design()
     database = design.query['database']
 
@@ -247,7 +272,7 @@ class HiveServer2Dbms(object):
     if result_meta.in_tablename:
       self.use(database)
 
-      hql = 'CREATE TABLE `%s.%s` AS %s' % (database, target_table, design.query['query'])
+      hql = 'CREATE TABLE %s.%s AS %s' % (target_database, target_table, design.query['query'])
       query_history = self.execute_statement(hql)
     else:
       # Case 2: The results are in some temporary location
@@ -335,11 +360,18 @@ class HiveServer2Dbms(object):
     return None
 
 
-  def execute_next_statement(self, query_history):
-    query_history.statement_number += 1
+  def execute_next_statement(self, query_history, hql_query):
+    if query_history.is_success() or query_history.is_expired():
+      # We need to go to the next statement only if the previous one passed
+      query_history.statement_number += 1
+    else:
+      # We need to update the query in case it was fixed
+      query_history.refresh_design(hql_query)
+
     query_history.last_state = QueryHistory.STATE.submitted.index
     query_history.save()
     query = query_history.design.get_design()
+
     return self.execute_and_watch(query, query_history=query_history)
 
 
@@ -369,8 +401,7 @@ class HiveServer2Dbms(object):
     try:
       handle = self.client.query(query, query_history.statement_number)
       if not handle.is_valid():
-        msg = _("Server returning invalid handle for query id %(id)d [%(query)s]...") % \
-              {'id': query_history.id, 'query': query[:40]}
+        msg = _("Server returning invalid handle for query id %(id)d [%(query)s]...") % {'id': query_history.id, 'query': query[:40]}
         raise QueryServerException(msg)
     except QueryServerException, ex:
       LOG.exception(ex)
@@ -426,8 +457,8 @@ class HiveServer2Dbms(object):
     return self.execute_statement(hql)
 
 
-  def explain(self, statement):
-    return self.client.explain(statement)
+  def explain(self, query):
+    return self.client.explain(query)
 
 
   def getStatus(self):

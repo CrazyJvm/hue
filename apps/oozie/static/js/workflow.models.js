@@ -406,10 +406,10 @@ function initializeNodeData() {
   if (! ('sla' in self.data)) {
     self.data['sla'] = DEFAULT_SLA.slice(0);
   }
-  
+
   if (! ('credentials' in self.data)) {
 	self.data['credentials'] = getDefaultData()['credentials'].slice(0);
-  }  
+  }
 }
 
 var WorkflowModel = ModelModule($);
@@ -681,7 +681,9 @@ $.extend(GenericModel.prototype, {
   node_type: 'generic',
   workflow: 0,
   xml: '',
-  child_links: []
+  child_links: [],
+  data: getDefaultData(),
+  initialize: initializeNodeData
 });
 
 function nodeModelChooser(node_type) {

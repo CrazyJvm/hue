@@ -21,25 +21,31 @@ import json
 import logging
 import re
 import StringIO
+import urllib
 
-from avro import schema, datafile, io
+from avro import datafile, io
 
-from django.core.urlresolvers import reverse
 from django.http import HttpResponse
 from django.utils.translation import ugettext as _
 
 from desktop.lib.django_util import render
-from desktop.lib.exceptions_renderable import PopupException
 
 from hbase import conf
+from hbase.settings import DJANGO_APPS
 from hbase.api import HbaseApi
+from hbase.management.commands import hbase_setup
 from server.hbase_lib import get_thrift_type
 
 LOG = logging.getLogger(__name__)
 
 
+def has_write_access(user):
+  return user.is_superuser or user.has_hue_permission(action="write", app=DJANGO_APPS[0])
+
 def app(request):
-  return render('app.mako', request, {})
+  return render('app.mako', request, {
+    'can_write': has_write_access(request.user)
+  })
 
 # action/cluster/arg1/arg2/arg3...
 def api_router(request, url): # On split, deserialize anything
@@ -61,8 +67,9 @@ def api_router(request, url): # On split, deserialize anything
         data[i] = deserialize(item) # Sets local binding, needs to set in data
     return data
 
+  decoded_url_params = [urllib.unquote(arg) for arg in re.split(r'(?<!\\)/', url.strip('/'))]
   url_params = [safe_json_load((arg, request.POST.get(arg[0:16], arg))[arg[0:15] == 'hbase-post-key-'])
-                for arg in re.split(r'(?<!\\)/', url.strip('/'))] # Deserialize later
+                for arg in decoded_url_params] # Deserialize later
 
   if request.POST.get('dest', False):
     url_params += [request.FILES.get(request.REQUEST.get('dest'))]
@@ -113,3 +120,19 @@ def api_dump(response):
       return cleaned
 
   return HttpResponse(json.dumps({ 'data': clean(response), 'truncated': True, 'limit': trunc_limit }), content_type="application/json")
+
+
+def install_examples(request):
+  result = {'status': -1, 'message': ''}
+
+  if request.method != 'POST':
+    result['message'] = _('A POST request is required.')
+  else:
+    try:
+      hbase_setup.Command().handle_noargs()
+      result['status'] = 0
+    except Exception, e:
+      LOG.exception(e)
+      result['message'] = str(e)
+
+  return HttpResponse(json.dumps(result), mimetype="application/json")

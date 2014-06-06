@@ -40,10 +40,11 @@ from desktop.models import Document
 from jobsub.models import OozieDesign, OozieMapreduceAction
 from liboozie import oozie_api
 from liboozie.conf import OOZIE_URL
-from liboozie.oozie_api_test import OozieServerProvider
+from liboozie.oozie_api_tests import OozieServerProvider
 from liboozie.types import WorkflowList, Workflow as OozieWorkflow, Coordinator as OozieCoordinator,\
   Bundle as OozieBundle, CoordinatorList, WorkflowAction, BundleList
 
+from oozie.conf import ENABLE_CRON_SCHEDULING
 from oozie.models import Workflow, Node, Kill, Link, Job, Coordinator, History,\
   find_parameters, NODE_TYPES, Bundle
 from oozie.utils import workflow_to_dict, model_to_dict, smart_path
@@ -554,6 +555,25 @@ class TestAPI(OozieMockBase):
 
     assert_equal(0, test_response_json_object['status'])
 
+  def test_workflow_fail(self):
+    import oozie.views.api
+    old_method = oozie.views.api._workflow
+    def exception_method(*args, **kwargs):
+      logging.error( 'here' )
+      raise Exception("arg")
+    oozie.views.api._workflow = exception_method
+
+    try:
+      response = self.c.get(reverse('oozie:workflow', kwargs={'workflow': self.wf.pk}))
+      test_response_json = response.content
+      test_response_json_object = json.loads(test_response_json)
+
+      assert_equal(1, test_response_json_object['status'], test_response_json_object)
+      assert_equal('arg', test_response_json_object['message'], test_response_json_object)
+      assert_equal({}, test_response_json_object['details'], test_response_json_object)
+    finally:
+      oozie.views.api._workflow = old_method
+
   def test_workflow_validate_node(self):
     data = {"files":"[\"hive-site.xml\"]","job_xml":"hive-site.xml","description":"Show databases","workflow":17,"child_links":[{"comment":"","name":"ok","id":106,"parent":76,"child":74},{"comment":"","name":"error","id":107,"parent":76,"child":73}],"job_properties":"[{\"name\":\"oozie.hive.defaults\",\"value\":\"hive-site.xml\"}]","node_type":"hive","params":"[{\"value\":\"INPUT=/user/hue/oozie/workspaces/data\",\"type\":\"param\"}]","archives":"[]","node_ptr":76,"prepares":"[]","script_path":"hive.sql","id":76,"name":"Hive"}
     response = self.c.post(reverse('oozie:workflow_validate_node', kwargs={'workflow': self.wf.pk, 'node_type': 'hive'}), data={'node': json.dumps(data)}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
@@ -644,6 +664,25 @@ class TestAPI(OozieMockBase):
     assert_equal(0, response_json_dict['status'])
     assert_equal(0, len(response_json_dict['data']['workflows']))
 
+  def test_workflows_fail(self):
+    # Insert an exception
+    import oozie.utils
+    old_method = oozie.utils.model_to_dict
+    def exception_method(*args, **kwargs):
+      raise Exception("arg")
+    oozie.utils.model_to_dict = exception_method
+
+    try:
+      response = self.c.post(reverse('oozie:workflows') + "?managed=true", HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+      test_response_json = response.content
+      test_response_json_object = json.loads(test_response_json)
+
+      assert_equal(1, test_response_json_object['status'], test_response_json_object)
+      assert_equal("Must be GET request.", test_response_json_object['message'], test_response_json_object)
+      assert_equal({}, test_response_json_object['details'], test_response_json_object)
+    finally:
+      oozie.utils.model_to_dict = old_method
+
   def test_workflow_actions(self):
     response = self.c.get(reverse('oozie:workflow_actions', kwargs={'workflow': self.wf.pk}), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
     response_json_dict = json.loads(response.content)
@@ -655,6 +694,25 @@ class TestAPI(OozieMockBase):
     response_json_dict = json.loads(response.content)
     assert_equal(0, response_json_dict['status'])
     assert_equal(3, len(response_json_dict['data']['actions']))
+
+  def test_workflow_actions_fail(self):
+    # Insert an exception
+    import oozie.utils
+    old_method = oozie.utils.model_to_dict
+    def exception_method(*args, **kwargs):
+      raise Exception("arg")
+    oozie.utils.model_to_dict = exception_method
+
+    try:
+      response = self.c.post(reverse('oozie:workflow_actions', kwargs={'workflow': self.wf.pk}), HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+      test_response_json = response.content
+      test_response_json_object = json.loads(test_response_json)
+
+      assert_equal(1, test_response_json_object['status'], test_response_json_object)
+      assert_equal("Must be GET request.", test_response_json_object['message'], test_response_json_object)
+      assert_equal({}, test_response_json_object['details'], test_response_json_object)
+    finally:
+      oozie.utils.model_to_dict = old_method
 
   def test_autocomplete(self):
     response = self.c.get(reverse('oozie:autocomplete_properties'))
@@ -774,16 +832,31 @@ class TestEditor(OozieMockBase):
 
 
   def test_find_parameters(self):
+    data = json.dumps({'sla': [
+        {'key': 'enabled', 'value': True},
+        {'key': 'nominal-time', 'value': '${time}'},]}
+    )
     jobs = [Job(name="$a"),
             Job(name="foo ${b} $$"),
-            Job(name="${foo}", description="xxx ${foo}")]
+            Job(name="${foo}", description="xxx ${food}", data=data)]
 
-    result = [find_parameters(job, ['name', 'description']) for job in jobs]
-    assert_equal(set(["b", "foo"]), reduce(lambda x, y: x | set(y), result, set()))
+    result = [find_parameters(job, ['name', 'description', 'sla']) for job in jobs]
+    assert_equal(set(["b", "foo", "food", "time"]), reduce(lambda x, y: x | set(y), result, set()))
 
 
   def test_find_all_parameters(self):
+    self.wf.data = json.dumps({'sla': [
+        {'key': 'enabled', 'value': False},
+        {'key': 'nominal-time', 'value': '${time}'},]}
+    )
     assert_equal([{'name': u'output', 'value': u''}, {'name': u'SLEEP', 'value': ''}, {'name': u'market', 'value': u'US'}],
+                 self.wf.find_all_parameters())
+
+    self.wf.data = json.dumps({'sla': [
+        {'key': 'enabled', 'value': True},
+        {'key': 'nominal-time', 'value': '${time}'},]}
+    )
+    assert_equal([{'name': u'output', 'value': u''}, {'name': u'SLEEP', 'value': ''}, {'name': u'market', 'value': u'US'}, {'name': u'time', 'value': u''}],
                  self.wf.find_all_parameters())
 
 
@@ -1217,7 +1290,7 @@ class TestEditor(OozieMockBase):
       beeswax.conf.HIVE_CONF_DIR = Getter()
 
       action1 = Node.objects.get(workflow=self.wf, name='MyHive')
-      action1.credentials = [{'name': 'hcat', 'value': True}, {'name': 'hbase', 'value': False}]
+      action1.credentials = [{'name': 'hcat', 'value': True}, {'name': 'hbase', 'value': False}, {'name': 'hive2', 'value': True}]
       action1.save()
 
       xml = self.wf.to_xml(mapping={
@@ -1227,6 +1300,13 @@ class TestEditor(OozieMockBase):
                   'properties': [
                       ('hcat.metastore.uri', 'thrift://hue-koh-chang:9999'),
                       ('hcat.metastore.principal', 'hive')
+                  ]
+              },
+              'hive2': {
+                  'xml_name': 'hive2',
+                  'properties': [
+                      ('hive2.jdbc.url', 'jdbc:hive2://hue-koh-chang:8888'),
+                      ('hive2.server.principal', 'hive')
                   ]
               }
           }
@@ -1255,9 +1335,19 @@ class TestEditor(OozieMockBase):
         <value>hive</value>
       </property>
     </credential>
+    <credential name="hive2" type="hive2">
+      <property>
+        <name>hive2.jdbc.url</name>
+        <value>jdbc:hive2://hue-koh-chang:8888</value>
+      </property>
+      <property>
+        <name>hive2.server.principal</name>
+        <value>hive</value>
+      </property>
+    </credential>
   </credentials>
     <start to="MyHive"/>
-    <action name="MyHive" cred="hcat">
+    <action name="MyHive" cred="hcat,hive2">
         <hive xmlns="uri:oozie:hive-action:0.2">
             <job-tracker>${jobTracker}</job-tracker>
             <name-node>${nameNode}</name-node>
@@ -1438,9 +1528,48 @@ class TestEditor(OozieMockBase):
   def test_coordinator_gen_xml(self):
     coord = create_coordinator(self.wf, self.c, self.user)
 
+    finish = ENABLE_CRON_SCHEDULING.set_for_testing(False)
+
+    try:
+      assert_true(
+  """
+<coordinator-app name="MyCoord"
+  frequency="${coord:days(1)}"
+  start="2012-07-01T00:00Z" end="2012-07-04T00:00Z" timezone="America/Los_Angeles"
+  xmlns="uri:oozie:coordinator:0.2"
+  >
+  <controls>
+    <timeout>100</timeout>
+    <concurrency>3</concurrency>
+    <execution>FIFO</execution>
+    <throttle>10</throttle>
+  </controls>
+  <action>
+    <workflow>
+      <app-path>${wf_application_path}</app-path>
+      <configuration>
+        <property>
+          <name>username</name>
+          <value>${coord:user()}</value>
+        </property>
+        <property>
+          <name>SLEEP</name>
+          <value>1000</value>
+        </property>
+        <property>
+          <name>market</name>
+          <value>US</value>
+        </property>
+      </configuration>
+   </workflow>
+  </action>
+</coordinator-app>""" in coord.to_xml(), coord.to_xml())
+    finally:
+      finish()
+
     assert_true(
 """<coordinator-app name="MyCoord"
-  frequency="${coord:days(1)}"
+  frequency="0 0 * * *"
   start="2012-07-01T00:00Z" end="2012-07-04T00:00Z" timezone="America/Los_Angeles"
   xmlns="uri:oozie:coordinator:0.2"
   >
@@ -1519,7 +1648,7 @@ class TestEditor(OozieMockBase):
 
     assert_true(
 """<coordinator-app name="MyCoord"
-  frequency="${coord:days(1)}"
+  frequency="0 0 * * *"
   start="2012-07-01T00:00Z" end="2012-07-04T00:00Z" timezone="America/Los_Angeles"
   xmlns="uri:oozie:coordinator:0.2"
   >
@@ -1941,8 +2070,6 @@ class TestEditorBundle(OozieMockBase):
 class TestImportWorkflow04(OozieMockBase):
 
   def setUp(self):
-    raise SkipTest
-
     super(TestImportWorkflow04, self).setUp()
     self.setup_simple_workflow()
 
@@ -1988,10 +2115,12 @@ class TestImportWorkflow04(OozieMockBase):
     import_workflow(workflow, f.read())
     f.close()
     workflow.save()
-    assert_equal(2, len(Node.objects.filter(workflow=workflow)))
-    assert_equal(2, len(Link.objects.filter(parent__workflow=workflow)))
+    assert_equal(4, len(Node.objects.filter(workflow=workflow)))
+    assert_equal(4, len(Link.objects.filter(parent__workflow=workflow)))
     assert_equal('done', Node.objects.get(workflow=workflow, node_type='end').name)
     assert_equal('uri:oozie:workflow:0.4', workflow.schema_version)
+    assert_equal('job1.xml', workflow.job_xml)
+    assert_equal('[{"name": "mapred.job.queue.name", "value": "${queueName}"}]', workflow.job_properties)
     workflow.delete(skip_trash=True)
 
 
@@ -2173,9 +2302,9 @@ class TestImportWorkflow04(OozieMockBase):
     node = Node.objects.get(workflow=workflow, node_type='fs').get_full_node()
     assert_equal('[{"path":"${nameNode}${output}/testfs/renamed","permissions":"700","recursive":"false"}]', node.chmods)
     assert_equal('[{"name":"${nameNode}${output}/testfs"}]', node.deletes)
-    assert_equal('["${nameNode}${output}/testfs","${nameNode}${output}/testfs/source"]', node.mkdirs)
+    assert_equal('[{"name":"${nameNode}${output}/testfs"},{"name":"${nameNode}${output}/testfs/source"}]', node.mkdirs)
     assert_equal('[{"source":"${nameNode}${output}/testfs/source","destination":"${nameNode}${output}/testfs/renamed"}]', node.moves)
-    assert_equal('["${nameNode}${output}/testfs/new_file"]', node.touchzs)
+    assert_equal('[{"name":"${nameNode}${output}/testfs/new_file"}]', node.touchzs)
     workflow.delete(skip_trash=True)
 
 
@@ -2847,6 +2976,8 @@ class TestOozieSubmissions(OozieBase):
     job = OozieServerProvider.wait_until_completion(response.context['oozie_workflow'].id)
     assert_equal('SUCCEEDED', job.status)
     assert_equal(100, job.get_progress())
+    
+    raise SkipTest
 
     # Rerun with default options
     post_data.update({u'rerun_form_choice': [u'skip_nodes']})
@@ -3102,7 +3233,7 @@ class TestDashboard(OozieMockBase):
     assert_true('Workflow WordCount1' in response.content, response.content)
     assert_true('Workflow' in response.content, response.content)
 
-    response = self.c.get(reverse('oozie:list_oozie_workflow', args=[MockOozieApi.WORKFLOW_IDS[0], MockOozieApi.COORDINATOR_IDS[0]]))
+    response = self.c.get(reverse('oozie:list_oozie_workflow', args=[MockOozieApi.WORKFLOW_IDS[0]]) + '?coordinator_job_id=%s' % MockOozieApi.COORDINATOR_IDS[0])
     assert_true('Workflow WordCount1' in response.content, response.content)
     assert_true('Workflow' in response.content, response.content)
     assert_true('DailyWordCount1' in response.content, response.content)
@@ -3116,7 +3247,7 @@ class TestDashboard(OozieMockBase):
     assert_true('job_201302280955_0019' in response.content, response.content)
     assert_true('job_201302280955_0020' in response.content, response.content)
 
-    response = self.c.get(reverse('oozie:list_oozie_workflow_action', args=['XXX', MockOozieApi.COORDINATOR_IDS[0], MockOozieApi.BUNDLE_IDS[0]]))
+    response = self.c.get(reverse('oozie:list_oozie_workflow_action', args=['XXX']) + '?coordinator_job_id=%s&bundle_job_id=%s' % (MockOozieApi.COORDINATOR_IDS[0], MockOozieApi.BUNDLE_IDS[0]))
     assert_true('Bundle' in response.content, response.content)
     assert_true('MyBundle1' in response.content, response.content)
     assert_true('Coordinator' in response.content, response.content)
@@ -3150,7 +3281,7 @@ class TestDashboard(OozieMockBase):
 
 
   def test_workflows_permissions(self):
-    response = self.c.get(reverse('oozie:list_oozie_workflows')+"?format=json")
+    response = self.c.get(reverse('oozie:list_oozie_workflows') + '?format=json')
     assert_true('WordCount1' in response.content, response.content)
 
     # Rerun
@@ -3162,7 +3293,7 @@ class TestDashboard(OozieMockBase):
     client_not_me = make_logged_in_client(username='not_me', is_superuser=False, groupname='test', recreate=True)
     grant_access("not_me", "not_me", "oozie")
 
-    response = client_not_me.get(reverse('oozie:list_oozie_workflows')+"?format=json")
+    response = client_not_me.get(reverse('oozie:list_oozie_workflows') + '?format=json')
     assert_false('WordCount1' in response.content, response.content)
 
     # Rerun
@@ -3415,7 +3546,9 @@ COORDINATOR_DICT = {
     u'concurrency': [u'3'],
     u'execution': [u'FIFO'],
     u'throttle': [u'10'],
-    u'schema_version': [u'uri:oozie:coordinator:0.2']
+    u'schema_version': [u'uri:oozie:coordinator:0.2'],
+    u'cron_frequency': [u'0 0 * * *'],
+    u'isAdvancedCron': [u'on'],
 }
 BUNDLE_DICT = {
     u'name': [u'MyBundle'], u'description': [u'Description of my bundle'],

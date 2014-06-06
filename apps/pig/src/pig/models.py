@@ -15,10 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-try:
-  import json
-except ImportError:
-  import simplejson as json
+import json
 import posixpath
 
 from django.db import models
@@ -81,11 +78,16 @@ class PigScript(Document):
   def get_absolute_url(self):
     return reverse('pig:index') + '#edit/%s' % self.id
 
+  @property
+  def use_hcatalog(self):
+    script = self.dict['script']
+    return 'org.apache.hcatalog.pig.HCatStorer' in script or 'org.apache.hcatalog.pig.HCatLoader' in script
+
 
 def create_or_update_script(id, name, script, user, parameters, resources, hadoopProperties, is_design=True):
   try:
     pig_script = PigScript.objects.get(id=id)
-    pig_script.doc.get().can_read_or_exception(user)
+    pig_script.doc.get().can_write_or_exception(user)
   except PigScript.DoesNotExist:
     pig_script = PigScript.objects.create(owner=user, is_design=is_design)
     Doc.objects.link(pig_script, owner=pig_script.owner, name=name)
@@ -120,6 +122,7 @@ def get_scripts(user, is_design=None):
       'resources': data['resources'],
       'hadoopProperties': data.get('hadoopProperties', []),
       'isDesign': script.is_design,
+      'can_write': script.doc.get().can_write(user)
     }
     scripts.append(massaged_script)
 

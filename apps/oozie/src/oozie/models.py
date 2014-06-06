@@ -126,7 +126,7 @@ class Job(models.Model):
   is_trashed = models.BooleanField(default=False, db_index=True, verbose_name=_t('Is trashed'), blank=True, # Deprecated
                                    help_text=_t('If this job is trashed.'))
   doc = generic.GenericRelation(Document, related_name='oozie_doc')
-  data = models.TextField(blank=True, default=json.dumps({}))  # e.g. data=json.dump({'sla': [python data], ...})
+  data = models.TextField(blank=True, default=json.dumps({}))  # e.g. data=json.dumps({'sla': [python data], ...})
 
   objects = JobManager()
   unique_together = ('owner', 'name')
@@ -182,6 +182,11 @@ class Job(models.Model):
   def get_parameters(self):
     return json.loads(self.parameters)
 
+  def add_parameter(self, name, value):
+    oozie_parameters = self.get_parameters()
+    oozie_parameters.append({"name": name, "value": value})
+    self.parameters = json.dumps(oozie_parameters)
+
   @property
   def parameters_escapejs(self):
     return self._escapejs_parameters_list(self.parameters)
@@ -200,7 +205,7 @@ class Job(models.Model):
   def find_all_parameters(self):
     params = self.find_parameters()
 
-    if hasattr(self, 'sla'):
+    if hasattr(self, 'sla') and self.sla_enabled:
       for param in find_json_parameters(self.sla):
         if param not in params:
           params[param] = ''
@@ -219,7 +224,7 @@ class Job(models.Model):
 
   def is_editable(self, user):
     """Only owners or admins can modify a job."""
-    return user.is_superuser or self.owner == user
+    return user.is_superuser or self.owner == user or self.doc.get().can_write(user)
 
   @property
   def data_dict(self):
@@ -432,6 +437,10 @@ class Workflow(Job):
 
   def find_parameters(self):
     params = set()
+
+    if self.sla_enabled:
+      for param in find_json_parameters(self.sla):
+        params.add(param)
 
     for node in self.node_list:
       if hasattr(node, 'find_parameters'):
@@ -984,14 +993,14 @@ class Hive(Action):
       help_text=_t('List of names or paths of files to be added to the distributed cache and the task running directory.'))
   archives = models.TextField(default="[]", verbose_name=_t('Archives'),
       help_text=_t('List of names or paths of the archives to be added to the distributed cache.'))
-  job_properties = models.TextField(default='[{"name":"oozie.hive.defaults","value":"hive-site.xml"}]',
+  job_properties = models.TextField(default='[]',
                                     verbose_name=_t('Hadoop job properties'),
                                     help_text=_t('For the job configuration (e.g. mapred.job.queue.name=production)'))
   prepares = models.TextField(default="[]", verbose_name=_t('Prepares'),
                               help_text=_t('List of absolute paths to delete, then create, before starting the application. '
                                            'This should be used exclusively for directory cleanup.'))
-  job_xml = models.CharField(max_length=PATH_MAX, default='', blank=True, verbose_name=_t('Job XML'),
-                             help_text=_t('Refer to a Hive hive-site.xml file bundled in the workflow deployment directory. '))
+  job_xml = models.CharField(max_length=PATH_MAX, default='hive-config.xml', blank=True, verbose_name=_t('Job XML'),
+                             help_text=_t('Refer to a Hive hive-config.xml file bundled in the workflow deployment directory. Pick a name different than hive-site.xml.'))
 
   def get_properties(self):
     return json.loads(self.job_properties)
@@ -1192,7 +1201,7 @@ class SubWorkflow(Action):
   PARAM_FIELDS = ('subworkflow', 'propagate_configuration', 'job_properties', 'sla', 'credentials')
   node_type = 'subworkflow'
 
-  sub_workflow = models.ForeignKey(Workflow, db_index=True, verbose_name=_t('Sub-workflow'),
+  sub_workflow = models.ForeignKey(Workflow, default=None, db_index=True, blank=True, null=True, verbose_name=_t('Sub-workflow'),
                             help_text=_t('The sub-workflow application to include. You must own all the sub-workflows.'))
   propagate_configuration = models.BooleanField(default=True, verbose_name=_t('Propagate configuration'), blank=True,
                             help_text=_t('If the workflow job configuration should be propagated to the child workflow.'))
@@ -1204,7 +1213,7 @@ class SubWorkflow(Action):
 
 
 class Generic(Action):
-  PARAM_FIELDS = ('xml', 'credentials')
+  PARAM_FIELDS = ('xml', 'credentials', 'sla', 'credentials')
   node_type = 'generic'
 
   xml = models.TextField(default='', verbose_name=_t('XML of the custom action'),
@@ -1375,9 +1384,9 @@ DATASET_FREQUENCY = ['MINUTE', 'HOUR', 'DAY', 'MONTH', 'YEAR']
 class Coordinator(Job):
   frequency_number = models.SmallIntegerField(default=1, choices=FREQUENCY_NUMBERS, verbose_name=_t('Frequency number'),
                                               help_text=_t('The number of units of the rate at which '
-                                                           'data is periodically created.'))
+                                                           'data is periodically created.')) # unused
   frequency_unit = models.CharField(max_length=20, choices=FREQUENCY_UNITS, default='days', verbose_name=_t('Frequency unit'),
-                                    help_text=_t('The unit of the rate at which data is periodically created.'))
+                                    help_text=_t('The unit of the rate at which data is periodically created.')) # unused
   timezone = models.CharField(max_length=24, choices=TIMEZONES, default='America/Los_Angeles', verbose_name=_t('Timezone'),
                               help_text=_t('The timezone of the coordinator. Only used for managing the daylight saving time changes when combining several coordinators.'))
   start = models.DateTimeField(default=datetime.today(), verbose_name=_t('Start'),
@@ -1523,6 +1532,10 @@ class Coordinator(Job):
     for param in find_parameters(self, ['job_properties']):
       params[param] = ''
 
+    if self.sla_enabled:
+      for param in find_json_parameters(self.sla):
+        params.add(param)
+
     for dataset in self.dataset_set.all():
       for param in find_parameters(dataset, ['uri']):
         if param not in set(DATASET_FREQUENCY):
@@ -1569,6 +1582,31 @@ class Coordinator(Job):
   @property
   def sla_jsescaped(self):
     return json.dumps(self.sla, cls=JSONEncoderForHTML)
+
+  @property
+  def cron_frequency(self):
+    if 'cron_frequency' in self.data_dict:
+      return self.data_dict['cron_frequency']
+    else:
+      # Backward compatibility
+      freq = '0 0 * * *'
+      if self.frequency_number == 1:
+        if self.frequency_unit == 'MINUTES':
+          freq = '* * * * *'
+        elif self.frequency_unit == 'HOURS':
+          freq = '0 * * * *'
+        elif self.frequency_unit == 'DAYS':
+          freq = '0 0 * * *'
+        elif self.frequency_unit == 'MONTH':
+          freq = '0 0 * * *'
+      return {'frequency': freq, 'isAdvancedCron': False}
+
+
+  @cron_frequency.setter
+  def cron_frequency(self, cron_frequency):
+    data_ = self.data_dict
+    data_['cron_frequency'] = cron_frequency
+    self.data = json.dumps(data_)
 
 
 class DatasetManager(models.Manager):
@@ -1870,7 +1908,7 @@ class History(models.Model):
       pass
 
   @classmethod
-  def cross_reference_submission_history(cls, user, oozie_id, coordinator_job_id):
+  def cross_reference_submission_history(cls, user, oozie_id):
     # Try do get the history
     history = None
     try:
@@ -1882,6 +1920,20 @@ class History(models.Model):
 
     return history
 
+
+def get_link(oozie_id):
+  link = ''
+
+  if 'W@' in oozie_id:
+    link = reverse('oozie:list_oozie_workflow_action', kwargs={'action': oozie_id})
+  elif oozie_id.endswith('W'):
+    link = reverse('oozie:list_oozie_workflow', kwargs={'job_id': oozie_id})
+  elif oozie_id.endswith('C'):
+    link = reverse('oozie:list_oozie_coordinator', kwargs={'job_id': oozie_id})
+
+  return link
+
+
 def find_parameters(instance, fields=None):
   """Find parameters in the given fields"""
   if fields is None:
@@ -1890,6 +1942,8 @@ def find_parameters(instance, fields=None):
   params = []
   for field in fields:
     data = getattr(instance, field)
+    if field == 'sla' and not instance.sla_enabled:
+      continue
     if isinstance(data, list):
       params.extend(find_json_parameters(data))
     elif isinstance(data, basestring):

@@ -16,9 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
+
 from nose.tools import assert_true, assert_equal, assert_not_equal
 
-from desktop.lib.python_util import CaseInsensitiveDict
+from desktop.lib.python_util import CaseInsensitiveDict, force_dict_to_strings, force_list_to_strings
 
 
 class TestPythonUtil(object):
@@ -31,3 +33,27 @@ class TestPythonUtil(object):
     assert_equal("Test", d['test'])
     assert_not_equal("test", d['Test'])
     assert_not_equal("test", d['test'])
+
+  def test_force_dict_to_strings(self):
+    unicode_dict = {u'test': u'test'}
+    string_dict = {'test': 'test'}
+    transformed_dict = force_dict_to_strings(unicode_dict)
+    assert_equal(string_dict, transformed_dict)
+
+    # Embedded
+    unicode_dict = {u'test': {u'test': u'test'}}
+    string_dict = {'test': {'test': 'test'}}
+    transformed_dict = force_dict_to_strings(unicode_dict)
+    assert_equal(string_dict, transformed_dict)
+
+    # Embedded list
+    unicode_dict = {u'test': [{u'test': u'test'}]}
+    string_dict = {'test': [{'test': 'test'}]}
+    transformed_dict = force_dict_to_strings(unicode_dict)
+    assert_equal(string_dict, transformed_dict)
+
+  def test_force_list_to_strings(self):
+    unicode_list = [u'test', {u'test': u'test'}]
+    string_list = ['test', {'test': 'test'}]
+    transformed_list = force_list_to_strings(unicode_list)
+    assert_equal(string_list, transformed_list)

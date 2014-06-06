@@ -31,6 +31,7 @@ Action extensions are also versioned.
 Every action extension will have its own version via /xslt/<workflow version>/extensions/<name of extensions>.<version>.xslt
 """
 
+import json
 import logging
 from lxml import etree
 import os
@@ -51,6 +52,50 @@ LOG = logging.getLogger(__name__)
 OOZIE_NAMESPACES = ['uri:oozie:workflow:0.1', 'uri:oozie:workflow:0.2', 'uri:oozie:workflow:0.3', 'uri:oozie:workflow:0.4', 'uri:oozie:workflow:0.5']
 
 LINKS = ('ok', 'error', 'path')
+
+
+def _set_properties(workflow, root, namespace):
+  # root should be config element.
+  properties = []
+  seen = {}
+  namespaces = {
+    'n': namespace
+  }
+
+  for prop in root.xpath('n:property', namespaces=namespaces):
+    name = prop.xpath('n:name', namespaces=namespaces)[0].text
+    value = prop.xpath('n:value', namespaces=namespaces)[0].text
+    if name not in seen:
+      properties.append({'name': name, 'value': value})
+      seen[name] = True
+
+  workflow.job_properties = json.dumps(properties)
+
+
+def _global_configuration(workflow, root, namespace):
+  # root should be global config element.
+  namespaces = {
+    'n': namespace
+  }
+
+  job_xml = root.xpath('n:job-xml', namespaces=namespaces)
+  configuration = root.xpath('n:configuration', namespaces=namespaces)
+  if job_xml:
+    workflow.job_xml = job_xml[0].text
+  if configuration:
+    _set_properties(workflow, configuration[0], namespace)
+
+
+def _assign_workflow_properties(workflow, root, namespace):
+  namespaces = {
+    'n': namespace
+  }
+
+  global_config = root.xpath('n:global', namespaces=namespaces)
+  if global_config:
+    _global_configuration(workflow, global_config[0], namespace)
+
+  LOG.debug("Finished assigning properties to workflow %s" % smart_str(workflow.name))
 
 
 def _save_links(workflow, root):
@@ -77,7 +122,7 @@ def _save_links(workflow, root):
 
   Note: The nodes that these links point to should exist already.
   Note: Nodes are looked up by workflow and name.
-  Note: Skip global configuration explicitly. Unknown knows should throw an error.
+  Note: Unknown elements should throw an error.
   """
   # Iterate over nodes
   for child_el in root:
@@ -355,7 +400,7 @@ def _resolve_decision_relationships(workflow):
       link = Link(name='related', parent=decision, child=end)
       link.save()
 
-    children = [link.child.get_full_node() for link in decision.get_children_links().exclude(name__in=['error','default'])]
+    children = [_link.child.get_full_node() for _link in decision.get_children_links().exclude(name__in=['error','default'])]
 
     ends = set()
     for child in children:
@@ -408,7 +453,7 @@ def _resolve_decision_relationships(workflow):
     # Assume receive full node.
     children = [link.child.get_full_node() for link in node.get_children_links().exclude(name__in=['error','default'])]
 
-    # Multiple parents means that we've found an end.
+    # Multiple parents means that we've potentially found an end.
     # Joins will always have more than one parent.
     fan_in_count = len(node.get_parent_links().exclude(name__in=['error','default']))
     if fan_in_count > 1 and not isinstance(node, Join) and not isinstance(node, DecisionEnd):
@@ -435,8 +480,6 @@ def _resolve_decision_relationships(workflow):
 
     # Likely reached end.
     return None
-
-  helper(workflow.start.get_full_node())
 
   if Node.objects.filter(workflow=workflow).filter(node_type=Decision.node_type).exists():
     helper(workflow.start.get_full_node())
@@ -495,13 +538,15 @@ def _preprocess_nodes(workflow, transformed_root, workflow_definition_root, node
                   app_path = property_el.text
 
       if app_path is None:
-        raise RuntimeError(_("Could not find app-path for subworkflow %s") % full_node.name)
-
-      subworkflow = _resolve_subworkflow_from_deployment_dir(fs, workflow, app_path)
-      if subworkflow:
-        full_node.sub_workflow = subworkflow
+        LOG.debug("Could not find deployment directory for subworkflow action %s" % full_node.name)
       else:
-        raise RuntimeError(_("Could not find subworkflow with deployment directory: %s") % app_path)
+        LOG.debug("Found deployment directory for subworkflow action %s" % full_node.name)
+        subworkflow = _resolve_subworkflow_from_deployment_dir(fs, workflow, app_path)
+        if subworkflow:
+          LOG.debug("Found workflow %s in deployment directory %s" % (workflow, app_path))
+          full_node.sub_workflow = subworkflow
+        else:
+          LOG.debug("Could not find workflow with deployment directory: %s" % app_path)
 
 
 def _resolve_subworkflow_from_deployment_dir(fs, workflow, app_path):
@@ -608,6 +653,7 @@ def import_workflow_root(workflow, workflow_definition_root, metadata=None, fs=N
     _preprocess_nodes(workflow, transformed_root, workflow_definition_root, nodes, fs)
     _save_nodes(workflow, nodes)
     _save_links(workflow, workflow_definition_root)
+    _assign_workflow_properties(workflow, workflow_definition_root, schema_version)
     if metadata:
       _process_metadata(workflow, metadata)
 

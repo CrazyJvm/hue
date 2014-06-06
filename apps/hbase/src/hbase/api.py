@@ -28,7 +28,7 @@ from django.utils.encoding import smart_str
 from desktop.lib import thrift_util
 from desktop.lib.exceptions_renderable import PopupException
 
-from hbase.server.hbase_lib import get_thrift_attributes, get_thrift_type, get_client_type
+from hbase.server.hbase_lib import get_thrift_type, get_client_type
 from hbase import conf
 
 LOG = logging.getLogger(__name__)
@@ -44,7 +44,10 @@ class HbaseApi(object):
       cluster = args[0]
       return self.queryCluster(action, cluster, *args[1:])
     except Exception, e:
-      raise PopupException(_("Api Error: %s") % e.message)
+      if 'Could not connect to' in e.message:
+        raise PopupException(_("HBase Thrift 1 server cannot be contacted: %s") % e.message)
+      else:
+        raise PopupException(_("Api Error: %s") % e.message)
 
   def queryCluster(self, action, cluster, *args):
     client = self.connectCluster(cluster)
@@ -87,7 +90,8 @@ class HbaseApi(object):
                                   service_name="Hue HBase Thrift Client for %s" % name,
                                   kerberos_principal=None,
                                   use_sasl=False,
-                                  timeout_seconds=None)
+                                  timeout_seconds=None,
+                                  transport=conf.THRIFT_TRANSPORT.get())
 
   def get(self, cluster, tableName, row, column, attributes):
     client = self.connectCluster(cluster)
@@ -104,7 +108,7 @@ class HbaseApi(object):
 
   def getTableList(self, cluster):
     client = self.connectCluster(cluster)
-    return [{'name': name,'enabled': client.isTableEnabled(name)} for name in client.getTableNames()]
+    return [{'name': name, 'enabled': client.isTableEnabled(name)} for name in client.getTableNames()]
 
   def getRows(self, cluster, tableName, columns, startRowKey, numRows, prefix=False):
     client = self.connectCluster(cluster)
@@ -158,6 +162,10 @@ class HbaseApi(object):
   def deleteColumn(self, cluster, tableName, row, column):
     return self.deleteColumns(cluster, tableName, smart_str(row), [smart_str(column)])
 
+  def deleteAllRow(self, cluster, tableName, row, attributes):
+    client = self.connectCluster(cluster)
+    return client.deleteAllRow(tableName, smart_str(row), attributes)
+
   def putRow(self, cluster, tableName, row, data):
     client = self.connectCluster(cluster)
     mutations = []
@@ -172,7 +180,7 @@ class HbaseApi(object):
   def putUpload(self, cluster, tableName, row, column, value):
     client = self.connectCluster(cluster)
     Mutation = get_thrift_type('Mutation')
-    return client.mutateRow(tableName, row, [Mutation(column=smart_str(column), value=value.file.read(value.size))], None)
+    return client.mutateRow(tableName, smart_str(row), [Mutation(column=smart_str(column), value=value.file.read(value.size))], None)
 
   def getRowQuerySet(self, cluster, tableName, columns, queries):
     client = self.connectCluster(cluster)
@@ -187,7 +195,8 @@ class HbaseApi(object):
       if fs:
         fs = " AND (" + fs.strip() + ")"
       filterstring = "(ColumnPaginationFilter(%i,0) AND PageFilter(%i))" % (limit, limit) + (fs or "")
-      scan = get_thrift_type('TScan')(startRow=smart_str(query['row_key']), stopRow=None, timestamp=None, columns=[smart_str(column) for column in (query['columns'] or columns)], caching=None, filterString=filterstring, batchSize=None)
+      scan_columns = [smart_str(column.strip(':')) for column in query['columns']] or [smart_str(column.strip(':')) for column in columns]
+      scan = get_thrift_type('TScan')(startRow=smart_str(query['row_key']), stopRow=None, timestamp=None, columns=scan_columns, caching=None, filterString=filterstring, batchSize=None)
       scanner = client.scannerOpenWithScan(tableName, scan, None)
       aggregate_data += client.scannerGetList(scanner, query['scan_length'])
     return aggregate_data

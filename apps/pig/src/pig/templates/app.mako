@@ -116,11 +116,16 @@ ${ commonheader(None, "pig", user) | n,unicode }
               <a href="#"><i class="fa fa-edit"></i> ${ _('Pig') }</a>
             </li>
             <li data-bind="click: editScriptProperties" data-section="properties">
-              <a href="#"><i class="fa fa-reorder"></i> ${ _('Properties') }</a>
+              <a href="#"><i class="fa fa-bars"></i> ${ _('Properties') }</a>
             </li>
-            <li data-bind="click: saveScript">
+            <li data-bind="click: saveScript, visible: currentScript().can_write()">
               <a href="#" title="${ _('Save the script') }" rel="tooltip" data-placement="right">
                 <i class="fa fa-floppy-o"></i> ${ _('Save') }
+              </a>
+            </li>
+            <li data-bind="click: confirmNewScript">
+              <a href="#" title="${ _('New script') }" rel="tooltip" data-placement="right">
+                <i class="fa fa-plus-circle"></i> ${ _('New Script') }
               </a>
             </li>
             <li class="nav-header">${_('Run')}</li>
@@ -139,7 +144,6 @@ ${ commonheader(None, "pig", user) | n,unicode }
                 <i class="fa fa-tasks"></i> ${ _('Logs') }
               </a>
             </li>
-            <li class="nav-header">${_('File')}</li>
             <li data-bind="visible: currentScript().id() != -1, click: copyScript">
               <a href="#" title="${ _('Copy the script') }" rel="tooltip" data-placement="right">
                 <i class="fa fa-files-o"></i> ${ _('Copy') }
@@ -148,11 +152,6 @@ ${ commonheader(None, "pig", user) | n,unicode }
             <li data-bind="visible: currentScript().id() != -1, click: confirmDeleteScript">
               <a href="#" title="${ _('Delete the script') }" rel="tooltip" data-placement="right">
                 <i class="fa fa-trash-o"></i> ${ _('Delete') }
-              </a>
-            </li>
-            <li data-bind="click: confirmNewScript">
-              <a href="#" title="${ _('New script') }" rel="tooltip" data-placement="right">
-                <i class="fa fa-plus-circle"></i> ${ _('Script') }
               </a>
             </li>
             <li>
@@ -185,21 +184,21 @@ ${ commonheader(None, "pig", user) | n,unicode }
         </div>
         <div class="row-fluid">
           <div id="queryColumn" class="span9">
-            <a id="navigatorShow" href="#" title="${_('Show the function navigator')}" style="position:absolute;z-index: 10000; margin-top:10px;display:none;right:30px" rel="tooltip" data-placement="left"><i class="fa fa-compass"></i></a>
+            <a id="navigatorShow" href="#" title="${_('Show the assist')}" style="position:absolute;z-index: 10000; margin-top:10px;display:none;right:30px" rel="tooltip" data-placement="left"><i class="fa fa-compass"></i></a>
             <form id="queryForm">
               <textarea id="scriptEditor" data-bind="text:currentScript().script"></textarea>
             </form>
           </div>
           <div id="navigatorColumn" class="span3">
-            <a id="navigatorHide" href="#" title="${_('Hide the function navigator')}" rel="tooltip" data-placement="left" class="pull-right" style="margin:10px;margin-left: 0"><i class="fa fa-chevron-right"></i></a>
+            <a id="navigatorHide" href="#" title="${_('Hide the assist')}" rel="tooltip" data-placement="left" class="pull-right" style="margin:10px;margin-left: 0"><i class="fa fa-chevron-right"></i></a>
             <a href="#" title="${_('Double click on function to insert it in the editor')}" rel="tooltip" data-placement="left" class="pull-right" style="margin:10px;margin-left: 0"><i class="fa fa-question-circle"></i></a>
-            <h1 class="card-heading simple"><i class="fa fa-compass"></i> ${_('Navigator')}</h1>
+            <h1 class="card-heading simple"><i class="fa fa-compass"></i> ${_('Assist')}</h1>
             <div class="card-body">
               <p>
                 <input id="navigatorSearch" type="text" class="input-medium" placeholder="${ _('Function name...') }"/>
                 <ul id="navigatorFunctions" class="unstyled">
                   <li>
-                    <a class="navigatorFunctionCategory" href="javascript:void(0)">Eval Functions</a>
+                    <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Eval Functions</a>
                     <ul class="navigatorFunctionCategoryContent unstyled hide">
                       <li><a href="#">AVG(%VAR%)</a></li>
                       <li><a href="#">CONCAT(%VAR1%, %VAR2%)</a></li>
@@ -215,7 +214,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
                     </ul>
                   </li>
                   <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Relational Operators</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Relational Operators</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">COGROUP %VAR% BY %VAR%</a></li>
                         <li><a href="#">CROSS %VAR1%, %VAR2%;</a></li>
@@ -236,7 +235,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
                     </li>
 
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Input/Output</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Input/Output</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">LOAD '%FILE%';</a></li>
                         <li><a href="#">DUMP %VAR%;</a></li>
@@ -244,7 +243,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Debug</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Debug</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">EXPLAIN %VAR%;</a></li>
                         <li><a href="#">ILLUSTRATE %VAR%;</a></li>
@@ -252,13 +251,13 @@ ${ commonheader(None, "pig", user) | n,unicode }
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">HCatalog</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> HCatalog</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">LOAD '%TABLE%' USING org.apache.hcatalog.pig.HCatLoader();</a></li>
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Math</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Math</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">ABS(%VAR%)</a></li>
                         <li><a href="#">ACOS(%VAR%)</a></li>
@@ -282,7 +281,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Tuple, Bag, Map Functions</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Tuple, Bag, Map Functions</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">TOTUPLE(%VAR%)</a></li>
                         <li><a href="#">TOBAG(%VAR%)</a></li>
@@ -291,7 +290,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">String Functions</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> String Functions</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">INDEXOF(%STRING%, '%CHARACTER%', %STARTINDEX%)</a></li>
                         <li><a href="#">LAST_INDEX_OF(%STRING%, '%CHARACTER%', %STARTINDEX%)</a></li>
@@ -307,20 +306,20 @@ ${ commonheader(None, "pig", user) | n,unicode }
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Macros</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Macros</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">IMPORT '%PATH_TO_MACRO%';</a></li>
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">HBase</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> HBase</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li><a href="#">LOAD 'hbase://%TABLE%' USING org.apache.pig.backend.hadoop.hbase.HBaseStorage('%columnList%')</a></li>
                         <li><a href="#">STORE %VAR% INTO 'hbase://%TABLE%' USING org.apache.pig.backend.hadoop.hbase.HBaseStorage('%columnList%')</a></li>
                       </ul>
                     </li>
                     <li>
-                      <a class="navigatorFunctionCategory" href="javascript:void(0)">Python UDF</a>
+                      <a class="navigatorFunctionCategory" href="javascript:void(0)"><i class="fa fa-caret-right"></i> Python UDF</a>
                       <ul class="navigatorFunctionCategoryContent unstyled hide">
                         <li>
                           <a data-python="true" href="#">REGISTER 'python_udf.py' USING jython AS myfuncs;</a>
@@ -349,7 +348,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
           <br/>
           <br/>
 
-          <h4>${ _('Parameters') } &nbsp; <i id="parameters-dyk" class="fa fa-question-circle"></i></h4>
+          <h4>${ _('Pig parameters') } &nbsp; <i id="parameters-dyk" class="fa fa-question-circle"></i></h4>
           <div id="parameters-dyk-content" class="hide">
             <ul style="text-align: left;">
               <li>input /user/data</li>
@@ -525,7 +524,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
               </div>
             </div>
           </script>
-          <pre id="withoutLogs">${ _('No available logs.') } <img src="/static/art/spinner.gif"/></pre>
+          <pre id="withoutLogs">${ _('No available logs.') } <img src="/static/art/spinner.gif" data-bind="visible: currentScript().isRunning()"/></pre>
           <pre id="withLogs" class="hide scroll"></pre>
         </div>
       </div>
@@ -770,6 +769,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
 
   var HIVE_AUTOCOMPLETE_BASE_URL = "${ autocomplete_base_url | n,unicode }";
   var HIVE_AUTOCOMPLETE_FAILS_SILENTLY_ON = [503]; // error codes from beeswax/views.py - autocomplete
+  var HIVE_AUTOCOMPLETE_USER = "${ user }";
 
   var codeMirror;
 
@@ -803,9 +803,17 @@ ${ commonheader(None, "pig", user) | n,unicode }
 
     $(".navigatorFunctionCategory").on("click", function () {
       var _submenu = $(this).next(".navigatorFunctionCategoryContent");
-      _submenu.find("li").removeClass("hide");
+      if (_submenu.hasClass("hide")){
+        $(this).find("i").removeClass("fa-caret-right").addClass("fa-caret-down");
+        _submenu.find("li").removeClass("hide");
+        _submenu.removeClass("hide");
+      }
+      else {
+        $(this).find("i").removeClass("fa-caret-down").addClass("fa-caret-right");
+        _submenu.find("li").addClass("hide");
+        _submenu.addClass("hide");
+      }
       $("#navigatorSearch").val("");
-      _submenu.removeClass("hide");
     });
 
     $(".navigatorFunctionCategoryContent li a").on("click", function (e) {
@@ -822,20 +830,17 @@ ${ commonheader(None, "pig", user) | n,unicode }
         }
       );
       codeMirror.focus();
+      logGA('navigator/click');
     });
 
-    var navigatorSearchTimeout = -1;
-    $("#navigatorSearch").on("keyup", function () {
-      window.clearTimeout(navigatorSearchTimeout);
-      navigatorSearchTimeout = window.setTimeout(function () {
-        $(".navigatorFunctionCategoryContent").removeClass("hide");
-        $(".navigatorFunctionCategoryContent li").removeClass("hide");
-        $(".navigatorFunctionCategoryContent li").each(function () {
-          if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
-            $(this).addClass("hide");
-          }
-        });
-      }, 300);
+    $("#navigatorSearch").jHueDelayedInput(function(){
+      $(".navigatorFunctionCategoryContent").removeClass("hide");
+      $(".navigatorFunctionCategoryContent li").removeClass("hide");
+      $(".navigatorFunctionCategoryContent li").each(function () {
+        if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
+          $(this).addClass("hide");
+        }
+      });
     });
 
     $("#navigatorFunctions").css("max-height", ($(window).height() - 370) + "px").css("overflow-y", "auto");
@@ -1117,7 +1122,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
       refreshLogs();
       logsRefreshInterval = window.setInterval(function () {
         refreshLogs();
-      }, 1000);
+      }, 500);
     });
 
     $(document).on("stopLogsRefresh", function () {
@@ -1132,6 +1137,11 @@ ${ commonheader(None, "pig", user) | n,unicode }
       forceLogsAtEnd = true;
     });
 
+    $(document).on("stopError", function () {
+      $.jHueNotify.error(LABELS.KILL_ERROR);
+      logGA('stop');
+    });
+
     var _resizeTimeout = -1;
     $(window).on("resize", function () {
       window.clearTimeout(_resizeTimeout);
@@ -1141,13 +1151,9 @@ ${ commonheader(None, "pig", user) | n,unicode }
       }, 100);
     });
 
-    var _filterTimeout = -1;
-    $("#filter").on("keyup", function () {
-      window.clearTimeout(_filterTimeout);
-      _filterTimeout = window.setTimeout(function () {
-        viewModel.filterScripts($("#filter").val());
-      }, 350);
-    });
+    $("#filter").jHueDelayedInput(function(){
+      viewModel.filterScripts($("#filter").val());
+    }, 350);
 
     viewModel.filterScripts("");
 
@@ -1249,8 +1255,8 @@ ${ commonheader(None, "pig", user) | n,unicode }
         $("#" + mainSection).show();
         highlightMainMenu(mainSection);
       }
-      if (typeof trackOnGA == 'function' && includeGA == undefined){
-        trackOnGA(mainSection);
+      if (includeGA == undefined){
+        logGA(mainSection);
       }
     }
 
@@ -1262,9 +1268,7 @@ ${ commonheader(None, "pig", user) | n,unicode }
         highlightMenu(section);
       }
 
-      if (typeof trackOnGA == 'function'){
-        trackOnGA(mainSection + "/" + section);
-      }
+      logGA(mainSection + "/" + section);
     }
 
     function highlightMainMenu(mainSection) {
@@ -1289,7 +1293,6 @@ ${ commonheader(None, "pig", user) | n,unicode }
       "dashboard": function () {
         showMainSection("dashboard");
       },
-
       "edit": function () {
         showSection("editor", "edit");
       },
@@ -1405,6 +1408,12 @@ ${ commonheader(None, "pig", user) | n,unicode }
 
   function showAlert(msg) {
     $(document).trigger("info", msg);
+  }
+
+  function logGA(page) {
+    if (typeof trackOnGA == 'function'){
+      trackOnGA('pig/' + page);
+    }
   }
 </script>
 

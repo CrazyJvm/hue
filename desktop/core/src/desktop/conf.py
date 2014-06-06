@@ -23,7 +23,7 @@ from django.utils.translation import ugettext_lazy as _
 
 from desktop.lib.conf import Config, ConfigSection, UnspecifiedConfigSection,\
                              coerce_bool, coerce_csv, coerce_json_dict,\
-                             validate_path, list_of_compiled_res
+                             validate_path, list_of_compiled_res, coerce_str_lowercase
 from desktop.lib.i18n import force_unicode
 from desktop.lib.paths import get_desktop_root
 
@@ -74,6 +74,12 @@ SSL_CIPHER_LIST = Config(
   key="ssl_cipher_list",
   help=_("List of allowed and disallowed ciphers"),
   default="DEFAULT:!aNULL:!eNULL:!LOW:!EXPORT:!SSLv2")
+
+LDAP_PASSWORD = Config(
+  key="ldap_password",
+  help=_("LDAP password of the hue user used for LDAP authentications. For example for LDAP Authentication with HiveServer2."),
+  private=True,
+  default=None)
 
 ENABLE_SERVER = Config(
   key="enable_server",
@@ -128,6 +134,26 @@ REDIRECT_WHITELIST = Config(
   type=list_of_compiled_res(skip_empty=True),
   default='')
 
+SECURE_PROXY_SSL_HEADER = Config(
+  key="secure_proxy_ssl_header",
+  help=_("Support for HTTPS termination at the load-balancer level with SECURE_PROXY_SSL_HEADER."),
+  type=coerce_bool,
+  default=False)
+
+APP_BLACKLIST = Config(
+  key='app_blacklist',
+  default='',
+  type=coerce_csv,
+  help=_('Comma separated list of apps to not load at server startup.')
+)
+
+DEMO_ENABLED = Config( # Internal and Temporary
+  key="demo_enabled",
+  help=_("To set to true in combination when using Hue demo backend."),
+  type=coerce_bool,
+  private=True,
+  default=False)
+
 def is_https_enabled():
   return bool(SSL_CERTIFICATE.get() and SSL_PRIVATE_KEY.get())
 
@@ -176,6 +202,7 @@ SMTP = ConfigSection(
       key="password",
       help=_("The password for the SMTP user."),
       type=str,
+      private=True,
       default=""
     ),
 
@@ -221,6 +248,7 @@ DATABASE = ConfigSection(
     PASSWORD=Config(
       key='password',
       help=_('Database password.'),
+      private=True,
       type=str,
       default='',
     ),
@@ -333,6 +361,7 @@ SERVER_USER = Config(
   help=_("Username to run servers as."),
   type=str,
   default="hue")
+
 SERVER_GROUP = Config(
   key="server_group",
   help=_("Group to run servers as."),
@@ -374,13 +403,125 @@ AUTH = ConfigSection(
                                "The HTTP header in the request is converted to a key by converting "
                                "all characters to uppercase, replacing any hyphens with underscores "
                                "and adding an HTTP_ prefix to the name. So, for example, if the header "
-                               "is called Remote-User that would be configured as HTTP_REMOTE_USER"))
+                               "is called Remote-User that would be configured as HTTP_REMOTE_USER")),
+    IGNORE_USERNAME_CASE = Config("ignore_username_case",
+                                  help=_("Ignore the case of usernames when searching for existing users in Hue."),
+                                  type=coerce_bool,
+                                  default=False),
+    FORCE_USERNAME_LOWERCASE = Config("force_username_lowercase",
+                                      help=_("Force usernames to lowercase when creating new users from LDAP."),
+                                      type=coerce_bool,
+                                      default=False),
+    EXPIRES_AFTER = Config("expires_after",
+                            help=_("Users will expire after they have not logged in for 'n' amount of seconds."
+                                   "A negative number means that users will never expire."),
+                            type=int,
+                            default=-1),
+    EXPIRE_SUPERUSERS = Config("expire_superusers",
+                                help=_("Apply 'expires_after' to superusers."),
+                                type=coerce_bool,
+                                default=True)
 ))
 
 LDAP = ConfigSection(
   key="ldap",
   help=_("Configuration options for LDAP connectivity."),
   members=dict(
+    CREATE_USERS_ON_LOGIN = Config("create_users_on_login",
+      help=_("Create users when they login with their LDAP credentials."),
+      type=coerce_bool,
+      default=True),
+    SYNC_GROUPS_ON_LOGIN = Config("sync_groups_on_login",
+      help=_("Synchronize a users groups when they login."),
+      type=coerce_bool,
+      default=False),
+    IGNORE_USERNAME_CASE = Config("ignore_username_case",
+      help=_("Ignore the case of usernames when searching for existing users in Hue."),
+      type=coerce_bool,
+      default=False),
+    FORCE_USERNAME_LOWERCASE = Config("force_username_lowercase",
+      help=_("Force usernames to lowercase when creating new users from LDAP."),
+      type=coerce_bool,
+      private=True,
+      default=False),
+    SUBGROUPS = Config("subgroups",
+      help=_("Choose which kind of subgrouping to use: nested or suboordinate (deprecated)."),
+      type=coerce_str_lowercase,
+      default="suboordinate"),
+    NESTED_MEMBERS_SEARCH_DEPTH = Config("nested_members_search_depth",
+      help=_("Define the number of levels to search for nested members."),
+      type=int,
+      default=10),
+
+    LDAP_SERVERS = UnspecifiedConfigSection(
+      key="ldap_servers",
+      help=_("LDAP server record."),
+      each=ConfigSection(
+        members=dict(
+          BASE_DN=Config("base_dn",
+                         default=None,
+                         help=_("The base LDAP distinguished name to use for LDAP search.")),
+          NT_DOMAIN=Config("nt_domain",
+                           default=None,
+                           help=_("The NT domain used for LDAP authentication.")),
+          LDAP_URL=Config("ldap_url",
+                           default=None,
+                           help=_("The LDAP URL to connect to.")),
+          USE_START_TLS=Config("use_start_tls",
+                               default=True,
+                               type=coerce_bool,
+                               help=_("Use StartTLS when communicating with LDAP server.")),
+          LDAP_CERT=Config("ldap_cert",
+                           default=None,
+                           help=_("A PEM-format file containing certificates for the CA's that Hue will trust for authentication over TLS. The certificate for the CA that signed the LDAP server certificate must be included among these certificates. See more here http://www.openldap.org/doc/admin24/tls.html.")),
+          LDAP_USERNAME_PATTERN=Config("ldap_username_pattern",
+                                       default=None,
+                                       help=_("A pattern to use for constructing LDAP usernames.")),
+          BIND_DN=Config("bind_dn",
+                         default=None,
+                         help=_("The distinguished name to bind as, when importing from LDAP.")),
+          BIND_PASSWORD=Config("bind_password",
+                               default=None,
+                               private=True,
+                               help=_("The password for the bind user.")),
+          SEARCH_BIND_AUTHENTICATION=Config("search_bind_authentication",
+                                            default=True,
+                                            type=coerce_bool,
+                                            help=_("Use search bind authentication.")),
+
+          USERS = ConfigSection(
+            key="users",
+            help=_("Configuration for LDAP user schema and search."),
+            members=dict(
+              USER_FILTER=Config("user_filter",
+                                 default="objectclass=*",
+                                 help=_("A base filter for use when searching for users.")),
+              USER_NAME_ATTR=Config("user_name_attr",
+                                    default="sAMAccountName",
+                                    help=_("The username attribute in the LDAP schema. "
+                                         "Typically, this is 'sAMAccountName' for AD and 'uid' "
+                                         "for other LDAP systems.")),
+            )
+          ),
+
+          GROUPS = ConfigSection(
+            key="groups",
+            help=_("Configuration for LDAP group schema and search."),
+            members=dict(
+              GROUP_FILTER=Config("group_filter",
+                                 default="objectclass=*",
+                                 help=_("A base filter for use when searching for groups.")),
+              GROUP_NAME_ATTR=Config("group_name_attr",
+                                    default="cn",
+                                    help=_("The group name attribute in the LDAP schema. "
+                                        "Typically, this is 'cn'.")),
+              GROUP_MEMBER_ATTR=Config("group_member_attr",
+                                       default="member",
+                                       help=_("The LDAP attribute which specifies the "
+                                            "members of a group.")),
+            ))))),
+
+    # Every thing below here is deprecated and should be removed in an upcoming major release.
     BASE_DN=Config("base_dn",
                    default=None,
                    help=_("The base LDAP distinguished name to use for LDAP search.")),
@@ -405,23 +546,12 @@ LDAP = ConfigSection(
                    help=_("The distinguished name to bind as, when importing from LDAP.")),
     BIND_PASSWORD=Config("bind_password",
                    default=None,
+                   private=True,
                    help=_("The password for the bind user.")),
     SEARCH_BIND_AUTHENTICATION=Config("search_bind_authentication",
                    default=True,
                    type=coerce_bool,
                    help=_("Use search bind authentication.")),
-    CREATE_USERS_ON_LOGIN = Config("create_users_on_login",
-      help=_("Create users when they login with their LDAP credentials."),
-      type=coerce_bool,
-      default=True),
-    IGNORE_USERNAME_CASE = Config("ignore_username_case",
-      help=_("Ignore the case of usernames when searching for existing users in Hue."),
-      type=coerce_bool,
-      default=False),
-    FORCE_USERNAME_LOWERCASE = Config("force_username_lowercase",
-      help=_("Force usernames to lowercase when creating new users from LDAP."),
-      type=coerce_bool,
-      default=False),
 
     USERS = ConfigSection(
       key="users",
@@ -435,8 +565,7 @@ LDAP = ConfigSection(
                               help=_("The username attribute in the LDAP schema. "
                                    "Typically, this is 'sAMAccountName' for AD and 'uid' "
                                    "for other LDAP systems.")),
-      )
-    ),
+      )),
 
     GROUPS = ConfigSection(
       key="groups",
@@ -453,9 +582,7 @@ LDAP = ConfigSection(
                                  default="member",
                                  help=_("The LDAP attribute which specifies the "
                                       "members of a group.")),
-      )
-    ),
-))
+      ))))
 
 
 OAUTH = ConfigSection(
@@ -509,6 +636,7 @@ LOCAL_FILESYSTEMS = UnspecifiedConfigSection(
                   required=True,
                   help=_("The path on the local filesystem.")))))
 
+
 def default_feedback_url():
   """A version-specific URL."""
   return "http://groups.google.com/a/cloudera.org/group/hue-user"
@@ -561,6 +689,26 @@ HTTP_500_DEBUG_MODE = Config(
   default=True
 )
 
+MEMORY_PROFILER = Config(
+  key='memory_profiler',
+  help=_('Enable or disable memory profiling.'),
+  type=coerce_bool,
+  default=False)
+
+AUDIT_EVENT_LOG_DIR = Config(
+  key="audit_event_log_dir",
+  help=_("The directory where to store the auditing logs. Auditing is disable if the value is empty."),
+  type=str,
+  default=""
+)
+
+AUDIT_LOG_MAX_FILE_SIZE = Config(
+  key="audit_log_max_file_size",
+  help=_("Size in KB/MB/GB for audit log to rollover."),
+  type=str,
+  default="100MB"
+)
+
 DJANGO_SERVER_EMAIL = Config(
   key='django_server_email',
   help=_('Email address that internal error messages should send as.'),
@@ -575,6 +723,40 @@ DJANGO_EMAIL_BACKEND = Config(
 )
 
 
+def validate_ldap(user, config):
+  res = []
+
+  if config.SEARCH_BIND_AUTHENTICATION.get():
+    if config.LDAP_URL.get() is not None and bool(config.BIND_DN.get()) != bool(config.BIND_PASSWORD.get()):
+      if config.BIND_DN.get() == None:
+        res.append((LDAP.BIND_DN,
+                  unicode(_("If you set bind_password, then you must set bind_dn."))))
+      else:
+        res.append((LDAP.BIND_PASSWORD,
+                    unicode(_("If you set bind_dn, then you must set bind_password."))))
+  else:
+    if config.NT_DOMAIN.get() is not None or \
+        config.LDAP_USERNAME_PATTERN.get() is not None:
+      if config.LDAP_URL.get() is None:
+        res.append((config.LDAP_URL,
+                    unicode(_("LDAP is only partially configured. An LDAP URL must be provided."))))
+
+    if config.LDAP_URL.get() is not None:
+      if config.NT_DOMAIN.get() is None and \
+          config.LDAP_USERNAME_PATTERN.get() is None:
+        res.append((config.LDAP_URL,
+                    unicode(_("LDAP is only partially configured. An NT Domain or username "
+                    "search pattern must be provided."))))
+
+    if config.LDAP_USERNAME_PATTERN.get() is not None and \
+        '<username>' not in config.LDAP_USERNAME_PATTERN.get():
+        res.append((config.LDAP_USERNAME_PATTERN,
+                   unicode(_("The LDAP username pattern should contain the special"
+                   "<username> replacement string for authentication."))))
+
+  return res
+
+
 def config_validator(user):
   """
   config_validator() -> [ (config_variable, error_message) ]
@@ -583,7 +765,7 @@ def config_validator(user):
   """
   from desktop.lib import i18n
 
-  res = [ ]
+  res = []
   if not SECRET_KEY.get():
     res.append((SECRET_KEY, unicode(_("Secret key should be configured as a random string."))))
 
@@ -612,32 +794,10 @@ def config_validator(user):
     res.extend(validate_path(KERBEROS.KINIT_PATH, is_dir=False))
     res.extend(validate_path(KERBEROS.CCACHE_PATH, is_dir=False))
 
-  if LDAP.SEARCH_BIND_AUTHENTICATION.get():
-    if LDAP.LDAP_URL.get() is not None and bool(LDAP.BIND_DN.get()) != bool(LDAP.BIND_PASSWORD.get()):
-      if LDAP.BIND_DN.get() == None:
-        res.append((LDAP.BIND_DN,
-                  unicode(_("If you set bind_password, then you must set bind_dn."))))
-      else:
-        res.append((LDAP.BIND_PASSWORD,
-                    unicode(_("If you set bind_dn, then you must set bind_password."))))
+  if LDAP.LDAP_SERVERS.get():
+    for ldap_record_key in LDAP.LDAP_SERVERS.get():
+      res.extend(validate_ldap(user, LDAP.LDAP_SERVERS.get()[ldap_record_key]))
   else:
-    if LDAP.NT_DOMAIN.get() is not None or \
-        LDAP.LDAP_USERNAME_PATTERN.get() is not None:
-      if LDAP.LDAP_URL.get() is None:
-        res.append((LDAP.LDAP_URL,
-                    unicode(_("LDAP is only partially configured. An LDAP URL must be provided."))))
-
-    if LDAP.LDAP_URL.get() is not None:
-      if LDAP.NT_DOMAIN.get() is None and \
-          LDAP.LDAP_USERNAME_PATTERN.get() is None:
-        res.append((LDAP.LDAP_URL,
-                    unicode(_("LDAP is only partially configured. An NT Domain or username "
-                    "search pattern must be provided."))))
-
-    if LDAP.LDAP_USERNAME_PATTERN.get() is not None and \
-        '<username>' not in LDAP.LDAP_USERNAME_PATTERN.get():
-        res.append((LDAP.LDAP_USERNAME_PATTERN,
-                   unicode(_("The LDAP username pattern should contain the special"
-                   "<username> replacement string for authentication."))))
+    res.extend(validate_ldap(user, LDAP))
 
   return res

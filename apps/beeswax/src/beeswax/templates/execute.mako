@@ -16,6 +16,8 @@
 <%!
   from desktop.lib.django_util import extract_field_data
   from desktop.views import commonheader, commonfooter
+  from beeswax import conf as beeswax_conf
+  from impala import conf as impala_conf
   from django.utils.translation import ugettext as _
 %>
 
@@ -25,170 +27,196 @@
 ${ commonheader(_('Query'), app_name, user) | n,unicode }
 ${layout.menubar(section='query')}
 
+<div id="temporaryPlaceholder"></div>
+
 <div id="query-editor" class="container-fluid hide section">
 <div class="row-fluid">
-<div class="span2" id="advanced-settings">
-  <form id="advancedSettingsForm" action="" method="POST" class="form form-horizontal">
-    <div class="sidebar-nav">
-      <ul class="nav nav-list">
-        <li class="nav-header">${_('database')}</li>
-        <li class="white" style="padding-top:0px">
+
+<div class="span2" id="navigator">
+  <ul class="nav nav-tabs" style="margin-bottom: 0">
+    <li class="active"><a href="#navigatorTab" data-toggle="tab" class="sidetab">${_('Assist')}</a></li>
+    <li><a href="#settingsTab" data-toggle="tab" class="sidetab">${_('Settings')} <span data-bind="visible:design.settings.values().length + design.fileResources.values().length + design.functions.values().length > 0, text: design.settings.values().length + design.fileResources.values().length + design.functions.values().length" class="badge badge-info">12</span></a></li>
+  </ul>
+  <div class="tab-content">
+    <div class="tab-pane active" id="navigatorTab">
+      <div class="card card-small card-tab">
+        <div class="card-body" style="margin-top: 0">
+          <a href="#" title="${_('Double click on a table name or field to insert it in the editor')}" rel="tooltip" data-placement="top" class="pull-right" style="margin:3px; margin-top:7px"><i class="fa fa-question-circle"></i></a>
+          <a id="refreshNavigator" href="#" title="${_('Manually refresh the table list')}" rel="tooltip" data-placement="top" class="pull-right" style="margin:3px; margin-top:7px"><i class="fa fa-refresh"></i></a>
+          <ul class="nav nav-list" style="border: none; padding: 0; background-color: #FFF">
+            <li class="nav-header">${_('database')}</li>
+          </ul>
           <select data-bind="options: databases, value: database" class="input-medium chosen-select" name="query-database" data-placeholder="${_('Choose a database...')}"></select>
-        </li>
-        <li class="nav-header">${_('settings')}</li>
-        <li class="white paramContainer">
-          <!-- ko foreach: design.settings.values -->
-          <div class="param">
-            <div class="remove">
-              <button data-bind="click: $root.removeSetting.bind(this, $index())" type="button" class="btn btn-mini settingsDelete" title="${_('Delete this setting')}">x
-              </button>
-            </div>
-            <div data-bind="css: {'error': $root.getSettingKeyErrors($index()).length > 0}" class="control-group">
-              <label>${_('Key')}</label>
-              <input data-bind="value: key" type="text" class="settingsField span8" autocomplete="off" placeholder="mapred.reduce.tasks"/>
-            </div>
-
-            <div data-bind="css: {'error': $root.getSettingValueErrors($index()).length > 0}" class="control-group">
-              <label>${_('Value')}</label>
-              <input data-bind="value: value" type="text" class="settingValuesField span8" placeholder="1"/>
-            </div>
+          <input id="navigatorSearch" type="text" placeholder="${ _('Table name...') }" style="width:90%; margin-top: 20px"/>
+          <div id="navigatorNoTables">${_('The selected database has no tables.')}</div>
+          <ul id="navigatorTables" class="unstyled"></ul>
+          <div id="navigatorLoader">
+            <!--[if !IE]><!--><i class="fa fa-spinner fa-spin" style="font-size: 20px; color: #DDD"></i><!--<![endif]-->
+            <!--[if IE]><img src="/static/art/spinner.gif"/><![endif]-->
           </div>
-          <!-- /ko -->
-
-          <div class="control-group">
-            <a data-bind="click: function() { $root.addSetting('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
-          </div>
-        </li>
-        <li class="nav-header
-          % if app_name == 'impala':
-             hide
-          % endif
-          ">
-          ${_('File Resources')}
-        </li>
-        <li class="white paramContainer
-          % if app_name == 'impala':
-             hide
-          % endif
-          ">
-          <!-- ko foreach: design.fileResources.values -->
-          <div class="param">
-            <div class="remove">
-              <button data-bind="click: $root.removeFileResource.bind(this, $index())" type="button" class="btn btn-mini" title="${_('Delete this setting')}">&times;</button>
-            </div>
-            <div data-bind="css: {'error': $root.getFileResourceTypeErrors($index()).length > 0}" class="control-group">
-              <label>${_('Type')}</label>
-              <select data-bind="value: type" class="input-small">
-                <option value="JAR">${_('jar')}</option>
-                <option value="ARCHIVE">${_('archive')}</option>
-                <option value="FILE">${_('file')}</option>
-              </select>
-            </div>
-
-            <div data-bind="css: {'error': $root.getFileResourcePathErrors($index()).length > 0}" class="control-group">
-              <label>${_('Path')}</label>
-              <input data-bind="value: path" type="text" class="filesField span7 fileChooser" placeholder="/user/foo/udf.jar"/>
-            </div>
-          </div>
-          <!-- /ko -->
-
-          <div class="control-group">
-            <a data-bind="click: function() { $root.addFileResource('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
-          </div>
-        </li>
-        <li title="${ _('User-Defined Functions') }" class="nav-header
-          % if app_name == 'impala':
-            hide
-          % endif
-          ">
-          ${_('UDFs')}
-        </li>
-        <li class="white paramContainer
-          % if app_name == 'impala':
-            hide
-          % endif
-          ">
-          <!-- ko foreach: design.functions.values -->
-          <div class="param">
-            <div class="remove">
-              <button data-bind="click: $root.removeFunction.bind(this, $index())" type="button" class="btn btn-mini settingsDelete" title="${_('Delete this setting')}">&times;</button>
-            </div>
-            <div data-bind="css: {'error': $root.getFunctionNameErrors($index()).length > 0}" class="control-group">
-              <label>${_('Name')}</label>
-              <input data-bind="value: name" type="text" class="functionsField span8" autocomplete="off" placeholder="myFunction"/>
-            </div>
-
-            <div data-bind="css: {'error': $root.getFunctionClassNameErrors($index()).length > 0}" class="control-group">
-              <label>${_('Class name')}</label>
-              <input data-bind="value: class_name" type="text" class="classNamesField span8" placeholder="com.acme.example"/>
-            </div>
-          </div>
-          <!-- /ko -->
-
-          <div class="control-group">
-            <a data-bind="click: function() { $root.addFunction('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
-          </div>
-        </li>
-        <li class="nav-header">${_('Options')}</li>
-        <li class="white" style="padding-top:0px">
-          <label class="checkbox" rel="tooltip" data-original-title="${_("If checked (the default), you can include parameters like $parameter_name in your query, and users will be prompted for a value when the query is run.")}">
-            <input data-bind="checked: design.isParameterized" type="checkbox"/>
-            ${_("Enable parameterization")}
-          </label>
-          <label class="checkbox
-          % if app_name == 'impala':
-            hide
-          % endif
-          " rel="tooltip" data-original-title="${_("If checked, you will receive an email notification when the query completes.")}">
-            <input data-bind="checked: design.email" type="checkbox"/>
-            ${_("Email me on completion")}
-          </label>
-        </li>
-        % if app_name == 'impala':
-          <li class="nav-header">
-            ${_('Metastore Catalog')}
-          </li>
-          <li class="white">
-            <div class="control-group">
-              <span id="refresh-dyk">
-                <i class="fa fa-refresh"></i>
-                ${ _('Sync tables tips') }
-              </span>
-
-              <div id="refresh-content" class="hide">
-                <ul style="text-align: left;">
-                  <li>"invalidate
-                    metadata" ${ _("invalidates the entire catalog metadata. All table metadata will be reloaded on the next access.") }</li>
-                  <li>"invalidate metadata
-                    &lt;table&gt;" ${ _("invalidates the metadata, load on the next access") }</li>
-                  <li>"refresh
-                    &lt;table&gt;" ${ _("refreshes the metadata immediately. It is a faster, incremental refresh.") }</li>
-                </ul>
-              </div>
-            </div>
-          </li>
-        % endif
-        <li class="nav-header"></li>
-        <li class="white">
-          <div class="control-group">
-            <i class="fa fa-question-circle" id="help"></i>
-
-            <div id="help-content" class="hide">
-              <ul style="text-align: left;">
-                <li>${ _('Press CTRL + Space to autocomplete') }</li>
-                <li>${ _("You can execute queries with multiple SQL statements delimited by a semicolon ';'") }</li>
-                <li>${ _('You can highlight and run a fragment of a query') }</li>
-              </ul>
-            </div>
-          </div>
-        </li>
-      </ul>
+        </div>
+      </div>
     </div>
-  </form>
+    <div class="tab-pane" id="settingsTab">
+      <div class="card card-small card-tab">
+        <div class="card-body">
+          <div id="advanced-settings">
+          <form id="advancedSettingsForm" action="" method="POST" class="form form-horizontal">
+              <ul class="nav nav-list" style="border: none; padding: 0;">
+                <li class="nav-header">${_('settings')}</li>
+                <li class="white paramContainer">
+                  <!-- ko foreach: design.settings.values -->
+                  <div class="param">
+                    <div class="remove">
+                      <button data-bind="click: $root.removeSetting.bind(this, $index())" type="button" class="btn btn-mini settingsDelete" title="${_('Delete this setting')}">x
+                      </button>
+                    </div>
+                    <div data-bind="css: {'error': $root.getSettingKeyErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Key')}</label>
+                      <input data-bind="value: key" type="text" class="settingsField span8" autocomplete="off" placeholder="${ 'impala.resultset.cache.size' if app_name == 'impala' else 'mapred.reduce.tasks' }"/>
+                    </div>
+
+                    <div data-bind="css: {'error': $root.getSettingValueErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Value')}</label>
+                      <input data-bind="value: value" type="text" class="settingValuesField span8" placeholder="${ '5000' if app_name == 'impala' else '1' }"/>
+                    </div>
+                  </div>
+                  <!-- /ko -->
+
+                  <div class="control-group">
+                    <a data-bind="click: function() { $root.addSetting('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
+                  </div>
+                </li>
+                <li class="nav-header
+                  % if app_name == 'impala':
+                     hide
+                  % endif
+                  ">
+                  ${_('File Resources')}
+                </li>
+                <li class="white paramContainer
+                  % if app_name == 'impala':
+                     hide
+                  % endif
+                  ">
+                  <!-- ko foreach: design.fileResources.values -->
+                  <div class="param">
+                    <div class="remove">
+                      <button data-bind="click: $root.removeFileResource.bind(this, $index())" type="button" class="btn btn-mini" title="${_('Delete this setting')}">&times;</button>
+                    </div>
+                    <div data-bind="css: {'error': $root.getFileResourceTypeErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Type')}</label>
+                      <select data-bind="value: type" class="input-small">
+                        <option value="JAR">${_('jar')}</option>
+                        <option value="ARCHIVE">${_('archive')}</option>
+                        <option value="FILE">${_('file')}</option>
+                      </select>
+                    </div>
+
+                    <div data-bind="css: {'error': $root.getFileResourcePathErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Path')}</label>
+                      <input data-bind="value: path" type="text" class="filesField span7 fileChooser" placeholder="/user/foo/udf.jar"/>
+                    </div>
+                  </div>
+                  <!-- /ko -->
+
+                  <div class="control-group">
+                    <a data-bind="click: function() { $root.addFileResource('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
+                  </div>
+                </li>
+                <li title="${ _('User-Defined Functions') }" class="nav-header
+                  % if app_name == 'impala':
+                    hide
+                  % endif
+                  ">
+                  ${_('UDFs')}
+                </li>
+                <li class="white paramContainer
+                  % if app_name == 'impala':
+                    hide
+                  % endif
+                  ">
+                  <!-- ko foreach: design.functions.values -->
+                  <div class="param">
+                    <div class="remove">
+                      <button data-bind="click: $root.removeFunction.bind(this, $index())" type="button" class="btn btn-mini settingsDelete" title="${_('Delete this setting')}">&times;</button>
+                    </div>
+                    <div data-bind="css: {'error': $root.getFunctionNameErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Name')}</label>
+                      <input data-bind="value: name" type="text" class="functionsField span8" autocomplete="off" placeholder="myFunction"/>
+                    </div>
+
+                    <div data-bind="css: {'error': $root.getFunctionClassNameErrors($index()).length > 0}" class="control-group">
+                      <label>${_('Class name')}</label>
+                      <input data-bind="value: class_name" type="text" class="classNamesField span8" placeholder="com.acme.example"/>
+                    </div>
+                  </div>
+                  <!-- /ko -->
+
+                  <div class="control-group">
+                    <a data-bind="click: function() { $root.addFunction('','') }" class="btn btn-mini paramAdd">${_('Add')}</a>
+                  </div>
+                </li>
+                <li class="nav-header">${_('Options')}</li>
+                <li class="white" style="padding-top:0; padding-left:0">
+                  <label class="checkbox" rel="tooltip" data-original-title="${_("If checked (the default), you can include parameters like $parameter_name in your query, and users will be prompted for a value when the query is run.")}">
+                    <input data-bind="checked: design.isParameterized" type="checkbox"/>
+                    ${_("Enable parameterization")}
+                  </label>
+                  <label class="checkbox
+                  % if app_name == 'impala':
+                    hide
+                  % endif
+                  " rel="tooltip" data-original-title="${_("If checked, you will receive an email notification when the query completes.")}">
+                    <input data-bind="checked: design.email" type="checkbox"/>
+                    ${_("Email me on completion")}
+                  </label>
+                </li>
+                % if app_name == 'impala':
+                  <li class="nav-header">
+                    ${_('Metastore Catalog')}
+                  </li>
+                  <li class="white" style="padding-top:0; padding-left:0">
+                    <div class="control-group">
+                      <span id="refresh-dyk">
+                        <i class="fa fa-refresh"></i>
+                        ${ _('Sync tables tips') }
+                      </span>
+
+                      <div id="refresh-content" class="hide">
+                        <ul style="text-align: left;">
+                          <li>"invalidate
+                            metadata" ${ _("invalidates the entire catalog metadata. All table metadata will be reloaded on the next access.") }</li>
+                          <li>"invalidate metadata
+                            &lt;table&gt;" ${ _("invalidates the metadata, load on the next access") }</li>
+                          <li>"refresh
+                            &lt;table&gt;" ${ _("refreshes the metadata immediately. It is a faster, incremental refresh.") }</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </li>
+                % endif
+              </ul>
+          </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<div id="querySide" class="span8">
+<div id="querySide" class="span10">
   <div id="queryContainer" class="card card-small">
+    <div class="pull-right" style="margin: 10px">
+      <i class="fa fa-question-circle" id="help"></i>
+      <div id="help-content" class="hide">
+        <ul style="text-align: left;">
+          <li>${ _('Press CTRL + Space to autocomplete') }</li>
+          <li>${ _("You can execute queries with multiple SQL statements delimited by a semicolon ';'") }</li>
+          <li>${ _('You can highlight and run a fragment of a query') }</li>
+        </ul>
+      </div>
+    </div>
     <div style="margin-bottom: 30px">
         % if can_edit_name:
         <h1 class="card-heading simple">
@@ -215,17 +243,15 @@ ${layout.menubar(section='query')}
       <div class="tab-content">
         <div id="queryPane">
 
-          <div data-bind="css: {'hide': design.query.errors().length == 0}" class="hide alert alert-error">
+          <div data-bind="css: {'hide': design.errors().length == 0}" class="alert alert-error">
             <!-- ko if: $root.getQueryErrors().length > 0 -->
             <p><strong>${_('Please provide a query')}</strong></p>
             <!-- /ko -->
             <!-- ko if: $root.getQueryErrors().length == 0 -->
             <p><strong>${_('Your query has the following error(s):')}</strong></p>
 
-            <div>
-              <div data-bind="foreach: design.errors">
-                <p data-bind="text: $data" class="queryErrorMessage"></p>
-              </div>
+            <div data-bind="foreach: design.errors">
+              <p data-bind="text: $data" class="queryErrorMessage"></p>
             </div>
             <!-- /ko -->
           </div>
@@ -241,17 +267,17 @@ ${layout.menubar(section='query')}
           <textarea class="hide" tabindex="1" name="query" id="queryField"></textarea>
 
           <div class="actions">
-            % if app_name == 'impala':
-            <button data-bind="click: tryExecuteQuery, visible: !$root.design.isRunning() && $root.design.isFinished()" type="button" id="executeQuery" class="btn btn-primary disable-feedback" tabindex="2">${_('Execute')}</button>
+            <button data-bind="click: tryExecuteQuery, visible: $root.canExecute, enable: $root.queryEditorBlank" type="button" id="executeQuery" class="btn btn-primary disable-feedback" tabindex="2">${_('Execute')}</button>
             <button data-bind="click: tryCancelQuery, visible: $root.design.isRunning()" class="btn btn-danger" data-loading-text="${ _('Canceling...') }" rel="tooltip" data-original-title="${ _('Cancel the query') }">${ _('Cancel') }</button>
-            % else:
-            <button data-bind="click: tryExecuteQuery, enable: !$root.design.isRunning(), visible: $root.design.isFinished()" type="button" id="executeQuery" class="btn btn-primary disable-feedback" tabindex="2">${_('Execute')}</button>
-            % endif
-            <button data-bind="click: executeNextStatement, visible: !$root.design.isFinished()" type="button" class="btn btn-primary disable-feedback" tabindex="2">${_('Next')}</button>
 
+            <button data-bind="click: tryExecuteNextStatement, visible: !$root.design.isFinished()" type="button" class="btn btn-primary disable-feedback" tabindex="2">${_('Next')}</button>
+            <button data-bind="click: tryExecuteQuery, visible: !$root.design.isFinished()" type="button" id="executeQuery" class="btn btn-primary disable-feedback" tabindex="2">${_('Restart')}</button>
+
+            % if can_edit:
             <button data-bind="click: trySaveDesign, css: {'hide': !$root.design.id() || $root.design.id() == -1}" type="button" class="btn hide">${_('Save')}</button>
+            % endif
             <button data-bind="click: saveAsModal" type="button" class="btn">${_('Save as...')}</button>
-            <button data-bind="click: tryExplainQuery" type="button" id="explainQuery" class="btn">${_('Explain')}</button>
+            <button data-bind="click: tryExplainQuery, visible: $root.canExecute" type="button" id="explainQuery" class="btn">${_('Explain')}</button>
             &nbsp; ${_('or create a')} &nbsp;
             <button data-bind="click: createNewQuery" type="button" class="btn">${_('New query')}</button>
             <br/><br/>
@@ -262,29 +288,33 @@ ${layout.menubar(section='query')}
     </div>
   </div>
 
-  <div class="card card-small scrollable resultsContainer">
+  <div id="resizePanel"><a href="javascript:void(0)"><i class="fa fa-ellipsis-h"></i></a></div>
 
-    <div data-bind="visible: !$root.design.results.empty()">
+  <div class="card card-small scrollable resultsContainer">
+    <div data-bind="visible: !design.explain() && $root.hasResults()">
       <a id="expandResults" href="javascript:void(0)" title="${_('See results in full screen')}" rel="tooltip"
         class="view-query-results hide pull-right"><h4 style="margin-right: 20px"><i class="fa fa-expand"></i></h4></a>
 
       <a id="save-results" data-bind="click: saveResultsModal" href="javascript:void(0)" title="${_('Save the results to HDFS or a new Hive table')}" rel="tooltip"
-        class="view-query-results hide pull-right"><h4 style="margin-right: 20px"><i class="fa fa-save"></i></h4></a>
+        class="view-query-results hide pull-right"><h4 style="margin-right: 20px"><i class="fa fa-save"></i></h4>
+      </a>
 
-      <a id="download-csv" data-bind="attr: {'href': '/beeswax/download/' + $root.design.history.id() + '/csv'}" href="javascript:void(0)" title="${_('Download the results in CSV format')}" rel="tooltip"
-        class="view-query-results hide pull-right"><h4 style="margin-right: 20px"><i class="fa fa-arrow-circle-o-down"></i></h4></a>
+      <a id="download-csv" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/csv'}" href="javascript:void(0)" title="${_('Download the results in CSV format')}" rel="tooltip"
+        class="view-query-results download hide pull-right"><h4 style="margin-right: 20px"><i class="hfo hfo-file-csv"></i></h4>
+      </a>
 
-      <a id="download-excel" data-bind="attr: {'href': '/beeswax/download/' + $root.design.history.id() + '/xls'}" href="javascript:void(0)" title="${_('Download the results for excel')}" rel="tooltip"
-        class="view-query-results hide pull-right"><h4 style="margin-right: 20px"><i class="fa fa-arrow-circle-o-down"></i></h4></a>
-   </div>
+      <a id="download-excel" data-bind="attr: {'href': '/${ app_name }/download/' + $root.design.history.id() + '/xls'}" href="javascript:void(0)" title="${_('Download the results in XLS format')}" rel="tooltip"
+        class="view-query-results download hide pull-right"><h4 style="margin-right: 20px"><i class="hfo hfo-file-xls"></i></h4></a>
+    </div>
 
     <div class="card-body">
       <ul class="nav nav-tabs">
+        <li class="active recentLi"><a href="#recentTab" data-toggle="tab">${_('Recent queries')}</a></li>
         <li><a href="#query" data-toggle="tab">${_('Query')}</a></li>
         <!-- ko if: !design.explain() -->
         <li><a href="#log" data-toggle="tab">${_('Log')}</a></li>
         <!-- /ko -->
-        <!-- ko if: !design.explain() && !design.isRunning() -->
+        <!-- ko if: !design.explain() -->
         <li><a href="#columns" data-toggle="tab">${_('Columns')}</a></li>
         <li><a href="#results" data-toggle="tab">${_('Results')}</a></li>
         <li><a href="#chart" data-toggle="tab">${_('Chart')}</a></li>
@@ -295,32 +325,64 @@ ${layout.menubar(section='query')}
       </ul>
 
       <div class="tab-content">
-        <div class="tab-pane" id="query">
-          <pre data-bind="text: viewModel.design.statement()"></pre>
+        <div class="active tab-pane" id="recentTab">
+          <div id="recentLoader">
+            <!--[if !IE]><!--><i class="fa fa-spinner fa-spin" style="font-size: 20px; color: #DDD"></i><!--<![endif]-->
+            <!--[if IE]><img src="/static/art/spinner.gif"/><![endif]-->
+          </div>
+          <table id="recentQueries" class="table table-striped table-condensed datatables" cellpadding="0" cellspacing="0" data-tablescroller-enforce-height="true">
+            <thead>
+              <tr>
+                <th>${_('Time')}</th>
+                <th>${_('Query')}</th>
+                <th>${_('Result')}</th>
+                <th>&nbsp;</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
         </div>
+        <div class="tab-pane" id="query">
+          <pre data-bind="visible: viewModel.design.statement() == ''">${_('There is currently no query to visualize.')}</pre>
+          <pre data-bind="visible: viewModel.design.statement() != '', text: viewModel.design.statement()"></pre>
+        </div>
+
         <!-- ko if: design.explain() -->
         <div class="tab-pane" id="explanation">
           <pre data-bind="text: $root.design.results.explanation()"></pre>
         </div>
         <!-- /ko -->
+
         <!-- ko if: !design.explain() -->
-        <div class="active tab-pane" id="log">
-          <pre data-bind="text: $root.design.watch.logs().join('\n')"></pre>
+        <div class="tab-pane" id="log">
+          <div style="position:relative">
+            <ul data-bind="foreach: $root.design.watch.jobUrls" class="unstyled jobs-overlay">
+              <li><a data-bind="text: $.trim($data.name), attr: { href: $data.url }" target="_blank"></a></li>
+            </ul>
+            <pre data-bind="visible: $root.design.watch.logs().length == 0">${_('There are currently no logs to visualize.')} <img src="/static/art/spinner.gif" data-bind="visible: $root.design.isRunning()"/></pre>
+            <pre data-bind="visible: $root.design.watch.logs().length > 0, text: $root.design.watch.logs().join('\n')"></pre>
+          </div>
         </div>
+
         <div class="tab-pane" id="columns">
+          <pre data-bind="visible: $root.design.results.columns().length == 0">${_('There are currently no columns to visualize.')}</pre>
+          <div data-bind="visible: $root.design.results.columns().length > 10">
+            <input id="columnFilter" class="input-xlarge" type="text" placeholder="${_('Filter for column name or type...')}" />
+          </div>
           <table class="table table-striped table-condensed" cellpadding="0" cellspacing="0">
-            <thead>
-              <tr><th>${_('Name')}</th></tr>
-            </thead>
             <tbody data-bind="foreach: $root.design.results.columns">
-              <tr>
-                <td><a href="javascript:void(0)" class="column-selector" data-bind="text: $data.name"></a></td>
+              <tr class="columnRow" data-bind="visible: $index() > 0">
+                <td rel="columntooltip" data-placement="left" data-bind="attr: {title: '${ _("Scroll to the column") }">
+                  <a href="javascript:void(0)" data-row-selector="true" class="column-selector" data-bind="text: $data.name"></a>
+                </td>
+                <td class="columnType" data-bind="text: $.trim($data.type)"></td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div class="tab-pane" id="results">
 
+        <div class="tab-pane" id="results">
           <div data-bind="css: {'hide': design.results.errors().length == 0}" class="alert alert-error">
             <p><strong>${_('Fetching results ran into the following error(s):')}</strong></p>
 
@@ -329,34 +391,31 @@ ${layout.menubar(section='query')}
             </div>
           </div>
 
-          <div data-bind="css: {'hide': $root.design.results.empty()}" class="hide">
-            <table class="table table-striped table-condensed resultTable" cellpadding="0" cellspacing="0" data-tablescroller-enforce-height="true">
+          <div data-bind="css: {'hide': !$root.hasResults()}">
+            <table id="resultTable" class="table table-striped table-condensed" cellpadding="0" cellspacing="0" data-tablescroller-enforce-height="true">
               <thead>
               <tr data-bind="foreach: $root.design.results.columns">
-                <th data-bind="text: $data.name, css: { 'sort-numeric': $.inArray($data.type, ['TINYINT_TYPE', 'SMALLINT_TYPE', 'INT_TYPE', 'BIGINT_TYPE', 'FLOAT_TYPE', 'DOUBLE_TYPE', 'DECIMAL_TYPE']) > -1, 'sort-date': $.inArray($data.type, ['TIMESTAMP_TYPE', 'DATE_TYPE']) > -1, 'sort-string': $.inArray($data.type, ['TINYINT_TYPE', 'SMALLINT_TYPE', 'INT_TYPE', 'BIGINT_TYPE', 'FLOAT_TYPE', 'DOUBLE_TYPE', 'DECIMAL_TYPE', 'TIMESTAMP_TYPE', 'DATE_TYPE']) == -1 }"></th>
+                <th data-bind="html: ($index() == 0 ? '&nbsp;' : $data.name), css: { 'sort-numeric': isNumericColumn($data.type), 'sort-date': isDateTimeColumn($data.type), 'sort-string': isStringColumn($data.type)}"></th>
               </tr>
               </thead>
             </table>
           </div>
 
-          <div data-bind="css: {'hide': !$root.design.results.empty()}" class="hide">
-            <div class="card card-small scrollable">
-              <div class="row-fluid">
-                <div class="span10 offset1 center empty-wrapper">
-                  <i class="fa fa-frown-o"></i>
-                  <h1>${_('The server returned no results.')}</h1>
-                  <br/>
-                </div>
-              </div>
-            </div>
+          <div data-bind="css: {'hide': !$root.design.results.empty() || $root.design.results.expired()}" id="resultEmpty">
+            <pre>${_('The operation has no results.')}</pre>
+          </div>
+
+          <div data-bind="css: {'hide': !$root.design.results.expired()}" id="resultExpired">
+            <pre>${_('The results have expired, rerun the query if needed.')}</pre>
           </div>
         </div>
 
-         <div class="tab-pane" id="chart">
-           <div class="alert hide">
+        <div class="tab-pane" id="chart">
+          <pre data-bind="visible: $root.design.results.columns().length == 0">${_('There is currently no data to build a chart on.')}</pre>
+          <div class="alert hide">
             <strong>${_('Warning:')}</strong> ${_('the results on the chart have been limited to 1000 rows.')}
           </div>
-          <div style="text-align: center">
+          <div data-bind="visible: $root.design.results.columns().length > 0" style="text-align: center">
           <form class="form-inline">
             ${_('Chart type')}&nbsp;
             <div class="btn-group" data-toggle="buttons-radio">
@@ -370,8 +429,7 @@ ${layout.menubar(section='query')}
               </label>&nbsp;&nbsp;
               <label>${_('Y-Axis')}
               <select id="blueprintY" class="blueprintSelect"></select>
-              </label>&nbsp;&nbsp;
-              <a rel="tooltip" data-placement="top" title="${_('Download image')}" id="blueprintDownload" href="javascript:void(0)" class="btn hide"><i class="fa fa-download"></i></a>
+              </label>
             </span>
             <span id="blueprintLatLng" class="hide">
               <label>${_('Latitude')}
@@ -386,7 +444,7 @@ ${layout.menubar(section='query')}
             </span>
           </form>
           </div>
-          <div id="blueprint" class="empty">${_("Please select a chart type.")}</div>
+          <div  data-bind="visible: $root.design.results.columns().length > 0" id="blueprint" class="empty">${_("Please select a chart type.")}</div>
         </div>
         <!-- /ko -->
       </div>
@@ -394,26 +452,7 @@ ${layout.menubar(section='query')}
   </div>
 </div>
 
-<div class="span2" id="navigator">
-  <div class="card card-small">
-    <a href="#" title="${_('Double click on a table name or field to insert it in the editor')}" rel="tooltip" data-placement="left" class="pull-right" style="margin:10px;margin-left: 0"><i class="fa fa-question-circle"></i></a>
-    <a id="refreshNavigator" href="#" title="${_('Manually refresh the table list')}" rel="tooltip" data-placement="left" class="pull-right" style="margin:10px"><i class="fa fa-refresh"></i></a>
 
-    <h1 class="card-heading simple"><i class="fa fa-compass"></i> ${_('Navigator')}</h1>
-
-    <div class="card-body">
-      <p>
-        <input id="navigatorSearch" type="text" placeholder="${ _('Table name...') }" style="width:90%"/>
-        <span id="navigatorNoTables">${_('The selected database has no tables.')}</span>
-        <ul id="navigatorTables" class="unstyled"></ul>
-        <div id="navigatorLoader">
-          <!--[if !IE]><!--><i class="fa fa-spinner fa-spin" style="font-size: 20px; color: #DDD"></i><!--<![endif]-->
-          <!--[if IE]><img src="/static/art/spinner.gif"/><![endif]-->
-        </div>
-      </p>
-    </div>
-  </div>
-</div>
 </div>
 </div>
 
@@ -482,7 +521,6 @@ ${layout.menubar(section='query')}
 <div id="chooseFile" class="modal hide fade">
   <div class="modal-header">
     <a href="#" class="close" data-dismiss="modal">&times;</a>
-
     <h3>${_('Choose a file')}</h3>
   </div>
   <div class="modal-body">
@@ -496,11 +534,23 @@ ${layout.menubar(section='query')}
 <div id="chooseFolder" class="modal hide fade">
   <div class="modal-header">
     <a href="#" class="close" data-dismiss="modal">&times;</a>
-
-    <h3>${_('Choose an empty folder')}</h3>
+    <h3>${_('Select a directory')}</h3>
   </div>
   <div class="modal-body">
     <div id="folderchooser">
+    </div>
+  </div>
+  <div class="modal-footer">
+  </div>
+</div>
+
+<div id="choosePath" class="modal hide fade">
+  <div class="modal-header">
+    <a href="#" class="close" data-dismiss="modal">&times;</a>
+    <h3>${_('Select a file or directory')}</h3>
+  </div>
+  <div class="modal-body">
+    <div id="pathchooser">
     </div>
   </div>
   <div class="modal-footer">
@@ -538,11 +588,17 @@ ${layout.menubar(section='query')}
 
 
 <div id="saveResultsModal" class="modal hide fade">
+  <div class="loader">
+    <div class="overlay"></div>
+    <!--[if !IE]><!--><i class="fa fa-spinner fa-spin"></i><!--<![endif]-->
+    <!--[if IE]><img class="spinner" src="/static/art/spinner-big-inverted.gif"/><![endif]-->
+  </div>
+
   <div class="modal-header">
     <a href="#" class="close" data-dismiss="modal">&times;</a>
     <h3>${_('Save Query Results')}</h3>
   </div>
-  <div class="modal-body">
+  <div class="modal-body" style="padding: 4px">
     <!-- ko if: $root.design.results.save.saveTargetError() -->
       <h4 data-bind="text: $root.design.results.save.saveTargetError()"></h4>
     <!-- /ko -->
@@ -554,6 +610,21 @@ ${layout.menubar(section='query')}
     <!-- /ko -->
     <form id="saveResultsForm" method="POST" class="form form-inline">
       <fieldset>
+        <div data-bind="css: {'error': $root.design.results.save.targetFileError()}" class="control-group">
+          <div class="controls">
+            <label class="radio">
+              <input data-bind="checked: $root.design.results.save.type" type="radio" name="save-results-type" value="hdfs-file">
+              &nbsp;${ _('In an HDFS file') }
+            </label>
+            <span data-bind="visible: $root.design.results.save.type() == 'hdfs-file'">
+              <input data-bind="value: $root.design.results.save.path" type="text" name="target_file" placeholder="${_('Path to CSV file')}" class="pathChooser">
+            </span>
+            <label class="radio" data-bind="visible: $root.design.results.save.type() == 'hdfs-file'">
+              <input data-bind="checked: $root.design.results.save.overwrite" type="checkbox" name="overwrite">
+              ${ _('Overwrite') }
+            </label>
+          </div>
+        </div>
         <div data-bind="css: {'error': $root.design.results.save.targetTableError()}" class="control-group">
           <div class="controls">
             <label class="radio">
@@ -561,35 +632,44 @@ ${layout.menubar(section='query')}
               &nbsp;${ _('In a new table') }
             </label>
             <span data-bind="visible: $root.design.results.save.type() == 'hive-table'">
-              <input data-bind="value: $root.design.results.save.path" type="text" name="target_table" placeholder="${_('Table name')}">
+              <input data-bind="value: $root.design.results.save.path" type="text" name="target_table" class="span4" placeholder="${_('Table name or <database name>.<table name>')}">
             </span>
           </div>
         </div>
-        <div data-bind="css: {'error': $root.design.results.save.targetDirectoryError()}" class="control-group">
+        <div data-bind="css: {'error': $root.design.results.save.targetDirectoryError()}" class="control-group hide advanced">
           <div class="controls">
             <label class="radio">
-              <input data-bind="checked: $root.design.results.save.type" type="radio" name="save-results-type" value="hdfs">
-              &nbsp;${ _('In an HDFS directory') }
+              <input data-bind="checked: $root.design.results.save.type" type="radio" name="save-results-type" value="hdfs-directory">
+              &nbsp;${ _('Big Query in HDFS') }
             </label>
-            <span data-bind="visible: $root.design.results.save.type() == 'hdfs'">
-              <input data-bind="value: $root.design.results.save.path" type="text" name="target_dir" placeholder="${_('Results location')}" class="pathChooser">
+            <span data-bind="visible: $root.design.results.save.type() == 'hdfs-directory'">
+              <input data-bind="value: $root.design.results.save.path" type="text" name="target_dir" placeholder="${_('Path to directory')}" class="folderChooser">
+              <i class="fa fa-question-circle" id="hdfs-directory-help"></i>
             </span>
           </div>
         </div>
       </fieldset>
     </form>
+    <div id="hdfs-directory-help-content" class="hide">
+      <p>${ _("Use this option if you have a large result. It will rerun the entire query and save the results to the chosen HDFS directory.") }</p>
+    </div>
   </div>
   <div class="modal-footer">
+    <a id="save-results-advanced" href="javascript:void(0)" class="pull-left">${ _('Show advanced fields') }</a>
+    <a id="save-results-simple" href="javascript:void(0)" class="pull-left hide">${ _('Hide advanced fields') }</a>
     <button class="btn" data-dismiss="modal">${_('Cancel')}</button>
-    <button data-bind="click: trySaveResults" class="btn btn-primary">${_('Save')}</button>
+    <button data-bind="click: trySaveResults" class="btn btn-primary disable-feedback">${_('Save')}</button>
   </div>
 </div>
 
 <div id="navigatorQuicklook" class="modal hide fade">
   <div class="modal-header">
     <a href="#" class="close" data-dismiss="modal">&times;</a>
-    <a class="tableLink pull-right" href="#" target="_blank" style="margin-right: 20px;margin-top:6px"><i
-        class="fa fa-external-link"></i> ${ _('View in Metastore Browser') }</a>
+    % if has_metastore:
+    <a class="tableLink pull-right" href="#" target="_blank" style="margin-right: 20px;margin-top:6px">
+      <iclass="fa fa-external-link"></i> ${ _('View in Metastore Browser') }
+    </a>
+    % endif
 
     <h3>${_('Data sample for')} <span class="tableName"></span></h3>
   </div>
@@ -605,6 +685,7 @@ ${layout.menubar(section='query')}
   </div>
 </div>
 
+<script src="/static/ext/js/jquery/plugins/jquery-ui-1.10.4.draggable-droppable-sortable.min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/routie-0.3.0.min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/knockout-min.js" type="text/javascript" charset="utf-8"></script>
 <script src="/static/ext/js/knockout.mapping-2.3.2.js" type="text/javascript" charset="utf-8"></script>
@@ -633,11 +714,11 @@ ${layout.menubar(section='query')}
     margin-bottom: 5px;
   }
 
-  #chooseFile, #chooseFolder {
+  #chooseFile, #chooseFolder, #choosePath {
     z-index: 1100;
   }
 
-  #filechooser, #folderchooser {
+  #filechooser, #folderchooser, #pathchooser {
     min-height: 100px;
     overflow-y: auto;
   }
@@ -679,10 +760,6 @@ ${layout.menubar(section='query')}
     background-color: #F0F0F0;
   }
 
-  .paramAdd {
-    margin-left: 18px;
-  }
-
   .remove {
     float: right;
   }
@@ -703,20 +780,16 @@ ${layout.menubar(section='query')}
     font-size: 11px;
   }
 
-  .editorError {
-    color: #B94A48;
-    background-color: #F2DEDE;
-    padding: 4px;
-    font-size: 11px;
-  }
-
   .editable-empty, .editable-empty:hover {
     color: #666;
     font-style: normal;
   }
 
-  #navigatorTables li {
-    width: 95%;
+  #navigatorTables {
+    margin: 4px;
+  }
+
+  #navigatorTables li div {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -724,6 +797,10 @@ ${layout.menubar(section='query')}
 
   #navigatorSearch, #navigatorNoTables {
     display: none;
+  }
+
+  #navigatorNoTables {
+    padding: 6px;
   }
 
   .tooltip.left {
@@ -736,14 +813,14 @@ ${layout.menubar(section='query')}
     left: 0;
     width: 100%;
     background-color: #FFFFFF;
-    z-index: 32000;
+    z-index: 100;
   }
 
   .map {
     height: 200px;
   }
 
-  .resultTable td, .resultTable th {
+  #resultTable td, #resultTable th {
     white-space: nowrap;
   }
 
@@ -751,9 +828,110 @@ ${layout.menubar(section='query')}
     min-height: 100px;
   }
 
+  .columnType {
+    text-align: right!important;
+    color: #999;
+  }
+
+  #queryContainer {
+    margin-bottom: 0;
+  }
+
+  #resizePanel a {
+    position: absolute;
+    cursor: ns-resize;
+    color: #666;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .resultsContainer {
+    margin-top: 20px;
+  }
+
+  #recentQueries {
+    width: 100%;
+  }
+
+  #recentQueries code {
+    cursor: pointer;
+    white-space: normal;
+  }
+
+  #recentQueries tr td:first-child {
+    white-space: nowrap;
+  }
+
+  #navigator .card-body {
+    margin-top: 1px !important;
+    padding: 6px !important;
+  }
+
+  #navigator .nav-header {
+    padding-left: 0;
+  }
+
+  #navigator .control-group {
+    padding-left: 0;
+  }
+
+  #navigator .nav-list > li.white, #navigator .nav-list .nav-header {
+    margin: 0;
+  }
+
+  .jobs-overlay {
+    background-color: #FFF;
+    opacity: 0.8;
+    position: absolute;
+    top: 10px;
+    right: 15px;
+  }
+
+  .jobs-overlay li {
+    padding: 5px;
+  }
+
+  .jobs-overlay:hover {
+    opacity: 1;
+  }
+
+  #saveResultsModal .overlay {
+    background: black; opacity: 0.5;
+    position: absolute;
+    top: 0px;
+    right:0px;
+    left: 0px;
+    bottom: 0px;
+    z-index: 100;
+  }
+
+  #saveResultsModal .loader {
+    text-align: center;
+    position: absolute;
+    top: 0px;
+    right:0px;
+    left: 0px;
+    bottom: 0px;
+  }
+
+  #saveResultsModal i.fa-spinner, #saveResultsModal img.spinner {
+    margin-top: -30px;
+    margin-left: -30px;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 101;
+  }
+
+  #saveResultsModal i.fa-spinner {
+    font-size: 60px;
+    color: #DDD;
+  }
+
 </style>
 
 <link href="/static/ext/css/leaflet.css" rel="stylesheet">
+<link href="/static/ext/css/hue-filetypes.css" rel="stylesheet">
 
 <script src="/static/ext/js/jquery/plugins/jquery-fieldselection.js" type="text/javascript"></script>
 <script src="/beeswax/static/js/autocomplete.utils.js" type="text/javascript" charset="utf-8"></script>
@@ -762,10 +940,11 @@ ${layout.menubar(section='query')}
 <script src="/static/ext/chosen/chosen.jquery.min.js" type="text/javascript" charset="utf-8"></script>
 
 <script type="text/javascript" charset="utf-8">
-var codeMirror, renderNavigator, resetNavigator, dataTable;
+var codeMirror, renderNavigator, resetNavigator, resizeNavigator, dataTable, renderRecent;
 
 var HIVE_AUTOCOMPLETE_BASE_URL = "${ autocomplete_base_url | n,unicode }";
-var HIVE_AUTOCOMPLETE_FAILS_SILENTLY_ON = [500]; // error codes from beeswax/views.py - autocomplete
+var HIVE_AUTOCOMPLETE_FAILS_QUIETLY_ON = [500]; // error codes from beeswax/views.py - autocomplete
+var HIVE_AUTOCOMPLETE_USER = "${ user }";
 
 var HIVE_AUTOCOMPLETE_GLOBAL_CALLBACK = function (data) {
   if (data != null && data.error) {
@@ -773,32 +952,142 @@ var HIVE_AUTOCOMPLETE_GLOBAL_CALLBACK = function (data) {
   }
 };
 
+function placeResizePanelHandle() {
+  // dynamically positioning the resize panel handle since IE doesn't play well with styles.
+  $("#resizePanel a").css("left", $("#resizePanel").position().left + $("#resizePanel").width()/2 - 8);
+}
 
-// Navigator.
+function reinitializeTableExtenders() {
+  $("#resultTable").jHueTableExtender({
+     fixedHeader: true,
+     includeNavigator: false
+  });
+  $("#recentQueries").jHueTableExtender({
+     fixedHeader: true,
+     includeNavigator: false
+  });
+}
+
+var CURRENT_CODEMIRROR_SIZE = 100;
+
+// Navigator, recent queries
 $(document).ready(function () {
+
+  var INITIAL_RESIZE_POSITION = 299;
+  $("#resizePanel a").draggable({
+    axis: "y",
+    drag: function(e, ui) {
+      draggableHelper($(this), e, ui);
+      $(".jHueTableExtenderClonedContainer").hide();
+    },
+    stop: function(e, ui) {
+      $(".jHueTableExtenderClonedContainer").show();
+      draggableHelper($(this), e, ui);
+      reinitializeTableExtenders();
+    }
+  });
+
+  function draggableHelper(el, e, ui) {
+    if (el.offset().top > INITIAL_RESIZE_POSITION){
+      CURRENT_CODEMIRROR_SIZE = 100 + (el.offset().top - INITIAL_RESIZE_POSITION);
+      codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
+    }
+    if (ui.position.top < INITIAL_RESIZE_POSITION) {
+      ui.position.top = INITIAL_RESIZE_POSITION;
+    }
+  }
+
+
+  var recentQueries = $("#recentQueries").dataTable({
+      "bPaginate": false,
+      "bLengthChange": false,
+      "bInfo": false,
+      "bFilter": false,
+      "aoColumns": [
+        { "sWidth" : "100px"},
+        null,
+        { "sWidth" : "80px", "bSortable": false },
+        { "bSortable": false, "sWidth" : "4px" }
+      ],
+      "aaSorting": [
+        [0, 'desc']
+      ],
+      "oLanguage": {
+        "sEmptyTable": "${_('No data available')}",
+        "sInfo": "${_('Showing _START_ to _END_ of _TOTAL_ entries')}",
+        "sInfoEmpty": "${_('Showing 0 to 0 of 0 entries')}",
+        "sInfoFiltered": "${_('(filtered from _MAX_ total entries)')}",
+        "sZeroRecords": "${_('No matching records')}",
+        "oPaginate": {
+          "sFirst": "${_('First')}",
+          "sLast": "${_('Last')}",
+          "sNext": "${_('Next')}",
+          "sPrevious": "${_('Previous')}"
+        }
+      }
+    });
+
+  renderRecent = function() {
+    $("#recentLoader").show();
+    recentQueries.fnClearTable();
+    $.getJSON("${ url(app_name + ':list_query_history') }?format=json", function(data) {
+      if (data && data.queries) {
+        var _rows = [];
+        $(data.queries).each(function(cnt, item){
+          _rows.push([
+            '<span data-time="' + item.timeInMs + '">' + item.timeFormatted + '</span>',
+            '<code style="cursor:pointer">' + item.query + '</code>',
+            (item.resultsUrl != "" ? '<a href="' + item.resultsUrl + '" data-row-selector-exclude="true">${_('See results...')}</a>': ''),
+            (item.designUrl != "" ? '<a href="' + item.designUrl + '" data-row-selector="true">&nbsp;</a>': '')
+          ]);
+        });
+        recentQueries.fnAddData(_rows);
+      }
+      $("a[data-row-selector='true']").jHueRowSelector();
+      $("#recentLoader").hide();
+      $("#recentQueries").css("width", "100%");
+      reinitializeTableExtenders();
+    });
+  }
+
+  $(document).on("click", "#recentQueries code", function(){
+    codeMirror.setValue($(this).text());
+  });
+
+  renderRecent();
 
   $("#navigatorQuicklook").modal({
     show: false
   });
 
-  var navigatorSearchTimeout = -1;
-  $("#navigatorSearch").on("keyup", function () {
-    window.clearTimeout(navigatorSearchTimeout);
-    navigatorSearchTimeout = window.setTimeout(function () {
-      $("#navigatorTables li").removeClass("hide");
-      $("#navigatorTables li").each(function () {
-        if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
-          $(this).addClass("hide");
-        }
-      });
-    }, 300);
+  $("#navigatorSearch").jHueDelayedInput(function(){
+    $("#navigatorTables li").removeClass("hide");
+    $("#navigatorTables li").each(function () {
+      if ($(this).text().toLowerCase().indexOf($("#navigatorSearch").val().toLowerCase()) == -1) {
+        $(this).addClass("hide");
+      }
+    });
   });
+
+  $("#columnFilter").jHueDelayedInput(function(){
+    $(".columnRow").removeClass("hide");
+    $(".columnRow").each(function () {
+      if ($(this).text().toLowerCase().indexOf($("#columnFilter").val().toLowerCase()) == -1) {
+        $(this).addClass("hide");
+      }
+    });
+  });
+
+  resizeNavigator = function () {
+    $("#navigator .card").css("min-height", ($(window).height() - 150) + "px");
+    $("#navigatorTables").css("max-height", ($(window).height() - 280) + "px").css("overflow-y", "auto");
+  }
 
   resetNavigator = function () {
     var _db = viewModel.database();
     if (_db != null) {
-      $.totalStorage('tables_' + _db, null);
-      $.totalStorage('timestamp_tables_' + _db, null);
+      $.totalStorage(hac_getTotalStorageUserPrefix() + 'tables_' + _db, null);
+      $.totalStorage(hac_getTotalStorageUserPrefix() + 'timestamp_tables_' + _db, null);
       renderNavigator();
     }
   }
@@ -810,7 +1099,12 @@ $(document).ready(function () {
       $(data.split(" ")).each(function (cnt, table) {
         if ($.trim(table) != "") {
           var _table = $("<li>");
-          _table.html("<a href='#' class='pull-right'><i class='fa fa-list' title='" + "${ _('Preview Sample data') }" + "' style='margin-left:5px'></i></a><a href='/metastore/table/" + viewModel.database() + "/" + table + "' target='_blank' class='pull-right hide'><i class='fa fa-eye' title='" + "${ _('View in Metastore Browser') }" + "'></i></a><a href='#' title='" + table + "'><i class='fa fa-table'></i> " + table + "</a><ul class='unstyled'></ul>");
+          var _metastoreLink = "";
+          % if has_metastore:
+            _metastoreLink = "<i class='fa fa-eye' title='" + "${ _('View in Metastore Browser') }" + "'></i>";
+          % endif
+          _table.html("<a href='javascript:void(0)' class='pull-right' style='padding-right:5px'><i class='fa fa-list' title='" + "${ _('Preview Sample data') }" + "' style='margin-left:5px'></i></a><a href='/metastore/table/" + viewModel.database() + "/" + table + "' target='_blank' class='pull-right hide'>" + _metastoreLink + "</a><div><a href='javascript:void(0)' title='" + table + "'><i class='fa fa-table'></i> " + table + "</a><ul class='unstyled'></ul></div>");
+
           _table.data("table", table).attr("id", "navigatorTables_" + table);
           _table.find("a:eq(2)").on("click", function () {
             _table.find(".fa-table").removeClass("fa-table").addClass("fa-spin").addClass("fa-spinner");
@@ -820,7 +1114,7 @@ $(document).ready(function () {
               _table.find(".fa-spinner").removeClass("fa-spinner").removeClass("fa-spin").addClass("fa-table");
               $(extended_columns).each(function (iCnt, col) {
                 var _column = $("<li>");
-                _column.html("<a href='#' style='padding-left:10px'" + (col.comment != null && col.comment != "" ? " title='" + col.comment + "'" : "") + "><i class='fa fa-columns'></i> " + col.name + " (" + col.type + ")</a>");
+                _column.html("<a href='javascript:void(0)' style='padding-left:10px'" + (col.comment != null && col.comment != "" ? " title='" + col.comment + "'" : "") + "><i class='fa fa-columns'></i> " + col.name + ($.trim(col.type) != "" ? " (" + $.trim(col.type) + ")" : "") + "</a>");
                 _column.appendTo(_table.find("ul"));
                 _column.on("dblclick", function () {
                   codeMirror.replaceSelection($.trim(col.name) + ', ');
@@ -836,12 +1130,13 @@ $(document).ready(function () {
             codeMirror.focus();
           });
           _table.find("a:eq(0)").on("click", function () {
+            var tableUrl = "/${ app_name }/api/table/" + viewModel.database() + "/" + _table.data("table");
             $("#navigatorQuicklook").find(".tableName").text(table);
-            $("#navigatorQuicklook").find(".tableLink").attr("href", "/metastore/table/" + viewModel.database() + "/" + _table.data("table"));
+            $("#navigatorQuicklook").find(".tableLink").attr("href", "/metastore/table/" + viewModel.database() + "/" + table);
             $("#navigatorQuicklook").find(".sample").empty("");
             $("#navigatorQuicklook").attr("style", "width: " + ($(window).width() - 120) + "px;margin-left:-" + (($(window).width() - 80) / 2) + "px!important;");
             $.ajax({
-              url: "/metastore/table/" + viewModel.database() + "/" + _table.data("table"),
+              url: tableUrl,
               data: {"sample": true},
               beforeSend: function (xhr) {
                 xhr.setRequestHeader("X-Requested-With", "Hue");
@@ -879,11 +1174,11 @@ $(document).ready(function () {
   $("#expandResults").on("click", function(){
     if ($(this).find("i").hasClass("fa-expand")){
       $(this).find("i").removeClass("fa-expand").addClass("fa-compress");
-      $(this).parent().addClass("fullscreen");
+      $(this).parent().parent().addClass("fullscreen");
     }
     else {
       $(this).find("i").addClass("fa-expand").removeClass("fa-compress");
-      $(this).parent().removeClass("fullscreen");
+      $(this).parent().parent().removeClass("fullscreen");
     }
     reinitializeTable();
   });
@@ -894,12 +1189,11 @@ $(document).ready(function () {
     resetNavigator();
   });
 
-  $("#navigator .card").css("min-height", ($(window).height() - 130) + "px");
-  $("#navigatorTables").css("max-height", ($(window).height() - 260) + "px").css("overflow-y", "auto");
+  resizeNavigator();
 
   viewModel.databases.subscribe(function () {
-    if ($.totalStorage("${app_name}_last_database") != null && $.inArray($.totalStorage("${app_name}_last_database"), viewModel.databases())) {
-      viewModel.database($.totalStorage("${app_name}_last_database"));
+    if ($.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_last_database") != null && $.inArray($.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_last_database"), viewModel.databases())) {
+      viewModel.database($.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_last_database"));
     }
   });
 
@@ -914,31 +1208,33 @@ $(document).ready(function () {
     no_results_text: "${_('Oops, no database found!')}"
   });
 
-  $(".chosen-select").chosen().change(function () {
-    $.totalStorage("${app_name}_last_database", viewModel.database());
-  });
-
   $(document).on("click", ".column-selector", function () {
-    var _t = $(".resultTable");
-    var _col = _t.find("th:econtains(" + $(this).text() + ")");
+    var _t = $("#resultTable");
+    var _text = $.trim($(this).text().split("(")[0]);
+    var _col = _t.find("th").filter(function() {
+      return $.trim($(this).text()) == _text;
+    });
     _t.find(".columnSelected").removeClass("columnSelected");
     _t.find("tr td:nth-child(" + (_col.index() + 1) + ")").addClass("columnSelected");
     $("a[href='#results']").click();
   });
 
-  $(document).on("shown", "a[data-toggle='tab']", function (e) {
+  $(document).on("shown", "a[data-toggle='tab']:not(.sidetab)", function (e) {
     if ($(e.target).attr("href") == "#log") {
       logsAtEnd = true;
       window.setTimeout(resizeLogs, 150);
     }
     if ($(e.target).attr("href") == "#results" && $(e.relatedTarget).attr("href") == "#columns") {
-      if ($(".resultTable .columnSelected").length > 0) {
-        var _t = $(".resultTable");
-        var _col = _t.find("th:nth-child(" + ($(".resultTable .columnSelected").index() + 1) + ")");
+      if ($("#resultTable .columnSelected").length > 0) {
+        var _t = $("#resultTable");
+        var _col = _t.find("th:nth-child(" + ($("#resultTable .columnSelected").index() + 1) + ")");
         _t.parent().animate({
           scrollLeft: _col.position().left + _t.parent().scrollLeft() - _t.parent().offset().left - 30
         }, 300);
       }
+    }
+    if ($(e.target).attr("href") == "#results" || $(e.target).attr("href") == "#recentTab") {
+      reinitializeTableExtenders();
     }
   });
 });
@@ -953,35 +1249,49 @@ function getHighlightedQuery() {
   return null;
 }
 
-function reinitializeTable () {
-  window.setTimeout(function(){
-    $(".dataTables_wrapper").jHueTableScroller({
-      minHeight: $(window).height() - 190,
-      heightAfterCorrection: 0
-    });
-    $(".resultTable").jHueTableExtender({
-      hintElement: "#jumpToColumnAlert",
-      fixedHeader: true,
-      firstColumnTooltip: true
-    });
-    $($("a[data-toggle='tab']").parent(".active").find("a").attr("href")).height($(".dataTables_wrapper").height());
-    $(".dataTables_wrapper").jHueScrollUp({
-      secondClickScrollToTop: true
-    });
-  }, 400)
+function reinitializeTable(max) {
+  var _max = max || 10;
+
+  function fn(){
+    var container = $($("a[data-toggle='tab']:not(.sidetab)").parent(".active").find("a").attr("href"));
+    if ($("#results .dataTables_wrapper").height() > 0) {
+      $("#results .dataTables_wrapper").jHueTableScroller({
+        minHeight: $(window).height() - 150,
+        heightAfterCorrection: 0
+      });
+      $("#recentTab .dataTables_wrapper").jHueTableScroller({
+        minHeight: $(window).height() - 150,
+        heightAfterCorrection: 0
+      });
+      reinitializeTableExtenders();
+      container.height($("#results .dataTables_wrapper").height());
+      $("#results .dataTables_wrapper").jHueScrollUp();
+    } else if ($('#resultEmpty').height() > 0) {
+      container.height($('#resultEmpty').height());
+    } else if ($('#resultExpired').height() > 0) {
+      container.height($('#resultExpired').height());
+    }
+
+    if ($("#results .dataTables_wrapper").data('original-height') == 0 && --_max != 0) {
+      $("#results .dataTables_wrapper").data('original-height', $("#results .dataTables_wrapper").height());
+      window.setTimeout(fn, 100);
+    }
+
+    if ($("#recentTab .dataTables_wrapper").data('original-height') == 0 && --_max != 0) {
+      $("#recentTab .dataTables_wrapper").data('original-height', $("#recentTab .dataTables_wrapper").height());
+      window.setTimeout(fn, 100);
+    }
+  }
+  window.setTimeout(fn, 100);
 }
 
 $(document).ready(function () {
-  var queryPlaceholder = "${_('Example: SELECT * FROM tablename, or press CTRL + space')}";
+  $.jHueScrollUp();
+
+  var queryPlaceholder = $("<span>").html($("<span>").html("${_('Example: SELECT * FROM tablename, or press CTRL + space')}").text()).text();
 
   $("#executeQuery").tooltip({
     title: '${_("Press \"tab\", then \"enter\".")}'
-  });
-
-  $("#executeQuery").keyup(function (event) {
-    if (event.keyCode == 13) {
-      tryExecuteQuery();
-    }
   });
 
   initQueryField();
@@ -995,8 +1305,7 @@ $(document).ready(function () {
     resizeTimeout = window.setTimeout(function () {
       // prevents endless loop in IE8
       if (winWidth != $(window).width() || winHeight != $(window).height()) {
-        $("#navigator .card").css("min-height", ($(window).height() - 130) + "px");
-        $("#navigatorTables").css("max-height", ($(window).height() - 260) + "px").css("overflow-y", "auto");
+        resizeNavigator();
         winWidth = $(window).width();
         winHeight = $(window).height();
       }
@@ -1018,6 +1327,10 @@ $(document).ready(function () {
   % endif
 
   CodeMirror.onAutocomplete = function (data, from, to) {
+    if (data.indexOf("(") > -1){
+      codeMirror.setCursor({line: from.line, ch: from.ch + data.length - 1});
+      codeMirror.execCommand("autocomplete");
+    }
     if (CodeMirror.tableFieldMagic) {
       codeMirror.replaceRange(" ", from, from);
       codeMirror.setCursor(from);
@@ -1025,15 +1338,70 @@ $(document).ready(function () {
     }
   };
 
+  $(document).on("error.autocomplete", function(){
+    $(".CodeMirror-spinner").remove();
+  });
+
+  function splitStatements(hql) {
+    var statements = [];
+    var current = "";
+    var betweenQuotes = null;
+    for (var i = 0, len = hql.length; i < len; i++) {
+      var c = hql[i];
+      current += c;
+      if ($.inArray(c, ['"', "'"]) > -1) {
+        if (betweenQuotes == c) {
+          betweenQuotes = null;
+        }
+        else if (betweenQuotes == null) {
+          betweenQuotes = c;
+        }
+      }
+      else if (c == ";") {
+        if (betweenQuotes == null) {
+          statements.push(current);
+          current = "";
+        }
+      }
+    }
+
+    if (current != "" && current != ";") {
+      statements.push(current);
+    }
+    return statements;
+  }
+
+  function getStatementAtCursor() {
+    var _pos = codeMirror.indexFromPos(codeMirror.getCursor());
+    var _statements = splitStatements(codeMirror.getValue());
+    var _cumulativePos = 0;
+    var _statementAtCursor = "";
+    var _relativePos = 0;
+    for (var i = 0; i < _statements.length; i++) {
+      if (_cumulativePos + _statements[i].length >= _pos && _statementAtCursor == "") {
+        _statementAtCursor = _statements[i].split("\n").join(" ");
+        _relativePos = _pos - _cumulativePos;
+      }
+      _cumulativePos += _statements[i].length;
+    }
+    return {
+      statement: _statementAtCursor,
+      relativeIndex: _relativePos
+    };
+  }
+
   CodeMirror.commands.autocomplete = function (cm) {
     $(document.body).on("contextmenu", function (e) {
       e.preventDefault(); // prevents native menu on FF for Mac from being shown
     });
 
     var pos = cm.cursorCoords();
-    $("<i class='fa fa-spinner fa-spin CodeMirror-spinner'></i>").css("top", pos.top + "px").css("left", (pos.left - 4) + "px").appendTo($("body"));
+    if ($(".CodeMirror-spinner").length == 0) {
+      $("<i class='fa fa-spinner fa-spin CodeMirror-spinner'></i>").appendTo($("body"));
+    }
+    $(".CodeMirror-spinner").css("top", pos.top + "px").css("left", (pos.left - 4) + "px").show();
 
-    if ($.totalStorage('tables_' + viewModel.database()) == null) {
+    if ($.totalStorage(hac_getTotalStorageUserPrefix() + 'tables_' + viewModel.database()) == null) {
       CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
       hac_getTables(viewModel.database(), function () {
       }); // if preload didn't work, tries again
@@ -1041,29 +1409,49 @@ $(document).ready(function () {
     else {
       hac_getTables(viewModel.database(), function (tables) {
         CodeMirror.catalogTables = tables;
-        var _before = codeMirror.getRange({line: 0, ch: 0}, {line: codeMirror.getCursor().line, ch: codeMirror.getCursor().ch}).replace(/(\r\n|\n|\r)/gm, " ");
-        CodeMirror.possibleTable = false;
-        CodeMirror.tableFieldMagic = false;
-        if (_before.toUpperCase().indexOf(" FROM ") > -1 && _before.toUpperCase().indexOf(" ON ") == -1 && _before.toUpperCase().indexOf(" WHERE ") == -1 ||
-            _before.toUpperCase().indexOf("REFRESH") > -1 || _before.toUpperCase().indexOf("METADATA") > -1 || _before.toUpperCase().indexOf("DESCRIBE") > -1) {
-          CodeMirror.possibleTable = true;
-        }
-        CodeMirror.possibleSoloField = false;
-        if (_before.toUpperCase().indexOf("SELECT ") > -1 && _before.toUpperCase().indexOf(" FROM ") == -1 && !CodeMirror.fromDot) {
-          if (codeMirror.getValue().toUpperCase().indexOf("FROM ") > -1) {
-            fieldsAutocomplete(cm);
-          }
-          else {
-            CodeMirror.tableFieldMagic = true;
-            CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
+        var _statementAtCursor = getStatementAtCursor();
+        var _before = _statementAtCursor.statement.substr(0, _statementAtCursor.relativeIndex).replace(/;+$/, "");
+        var _after = _statementAtCursor.statement.substr(_statementAtCursor.relativeIndex).replace(/;+$/, "");
+        if ($.trim(_before).substr(-1) == ".") {
+          var _statement = _statementAtCursor.statement;
+          var _line = codeMirror.getLine(codeMirror.getCursor().line);
+          var _partial = _line.substring(0, codeMirror.getCursor().ch);
+          var _table = _partial.substring(_partial.lastIndexOf(" ") + 1, _partial.length - 1);
+          if (_statement.indexOf("FROM") > -1) {
+            hac_getTableColumns(viewModel.database(), _table, _statement, function (columns) {
+              var _cols = columns.split(" ");
+              for (var col in _cols) {
+                _cols[col] = "." + _cols[col];
+              }
+              CodeMirror.catalogFields = _cols.join(" ");
+              CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
+            });
           }
         }
         else {
-          if (_before.toUpperCase().indexOf("WHERE ") > -1 && !CodeMirror.fromDot && _before.match(/ON|GROUP|SORT/) == null) {
-            fieldsAutocomplete(cm);
+          CodeMirror.possibleTable = false;
+          CodeMirror.tableFieldMagic = false;
+          if ((_before.toUpperCase().indexOf(" FROM ") > -1 || _before.toUpperCase().indexOf(" TABLE ") > -1 || _before.toUpperCase().indexOf(" STATS ") > -1) && _before.toUpperCase().indexOf(" ON ") == -1 && _before.toUpperCase().indexOf(" ORDER BY ") == -1 && _before.toUpperCase().indexOf(" WHERE ") == -1 ||
+              _before.toUpperCase().indexOf("REFRESH") > -1 || _before.toUpperCase().indexOf("METADATA") > -1 || _before.toUpperCase().indexOf("DESCRIBE") > -1) {
+            CodeMirror.possibleTable = true;
+          }
+          CodeMirror.possibleSoloField = false;
+          if (_before.toUpperCase().indexOf("SELECT ") > -1 && _before.toUpperCase().indexOf(" FROM ") == -1 && !CodeMirror.fromDot) {
+            if (_after.toUpperCase().indexOf("FROM ") > -1 || $.trim(_before).substr(-1) == "(") {
+              fieldsAutocomplete(cm);
+            }
+            else {
+              CodeMirror.tableFieldMagic = true;
+              CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
+            }
           }
           else {
-            CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
+            if ((_before.toUpperCase().indexOf("WHERE ") > -1 || _before.toUpperCase().indexOf("ORDER BY ") > -1) && !CodeMirror.fromDot && _before.toUpperCase().match(/ ON| LIMIT| GROUP| SORT/) == null) {
+              fieldsAutocomplete(cm);
+            }
+            else {
+              CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
+            }
           }
         }
       });
@@ -1073,20 +1461,30 @@ $(document).ready(function () {
   function fieldsAutocomplete(cm) {
     CodeMirror.possibleSoloField = true;
     try {
-      var _possibleTables = $.trim(codeMirror.getValue(" ").substr(codeMirror.getValue().toUpperCase().indexOf("FROM ") + 4)).split(" ");
+      var _value = getStatementAtCursor().statement;
+      var _from = _value.toUpperCase().indexOf("FROM");
+      if (_from > -1) {
+        var _match = _value.toUpperCase().substring(_from).match(/ ON| LIMIT| WHERE| GROUP| SORT| ORDER BY|;/);
+        var _to = _value.length;
+        if (_match) {
+          _to = _match.index;
+        }
+        var _found = _value.substr(_from, _to).replace(/(\r\n|\n|\r)/gm, "").replace(/from/gi, "").replace(/join/gi, ",").split(",");
+      }
+
       var _foundTable = "";
-      for (var i = 0; i < _possibleTables.length; i++) {
-        if ($.trim(_possibleTables[i]) != "" && _foundTable == "") {
-          _foundTable = _possibleTables[i];
+      for (var i = 0; i < _found.length; i++) {
+        if ($.trim(_found[i]) != "" && _foundTable == "") {
+          _foundTable = $.trim(_found[i]).split(" ")[0];
         }
       }
       if (_foundTable != "") {
-        if (hac_tableHasAlias(_foundTable, codeMirror.getValue())) {
+        if (hac_tableHasAlias(_foundTable, _value)) {
           CodeMirror.possibleSoloField = false;
           CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
         }
         else {
-          hac_getTableColumns(viewModel.database(), _foundTable, codeMirror.getValue(),
+          hac_getTableColumns(viewModel.database(), _foundTable, _value,
               function (columns) {
                 CodeMirror.catalogFields = columns;
                 CodeMirror.showHint(cm, AUTOCOMPLETE_SET);
@@ -1106,7 +1504,11 @@ $(document).ready(function () {
     value: queryEditor.value,
     readOnly: false,
     lineNumbers: true,
+    % if app_name == 'impala':
+    mode: "text/x-impalaql",
+    % else:
     mode: "text/x-hiveql",
+    % endif
     extraKeys: {
       "Ctrl-Space": function () {
         CodeMirror.fromDot = false;
@@ -1119,11 +1521,12 @@ $(document).ready(function () {
     onKeyEvent: function (e, s) {
       if (s.type == "keyup") {
         if (s.keyCode == 190) {
+          var _statement = getStatementAtCursor().statement;
           var _line = codeMirror.getLine(codeMirror.getCursor().line);
           var _partial = _line.substring(0, codeMirror.getCursor().ch);
           var _table = _partial.substring(_partial.lastIndexOf(" ") + 1, _partial.length - 1);
-          if (codeMirror.getValue().toUpperCase().indexOf("FROM") > -1) {
-            hac_getTableColumns(viewModel.database(), _table, codeMirror.getValue(), function (columns) {
+          if (_statement.indexOf("FROM") > -1) {
+            hac_getTableColumns(viewModel.database(), _table, _statement, function (columns) {
               var _cols = columns.split(" ");
               for (var col in _cols) {
                 _cols[col] = "." + _cols[col];
@@ -1144,28 +1547,33 @@ $(document).ready(function () {
     if (codeMirror.getValue() == queryPlaceholder) {
       codeMirror.setValue("");
     }
-    if (errorWidgets) {
-      $.each(errorWidgets, function(index, errorWidget) {
-        errorWidget.clear();
-      });
-      errorWidgets = [];
-    }
+    viewModel.queryEditorBlank(true);
+    clearErrorWidgets();
     $("#validationResults").empty();
   });
 
-  % if design and not design.id:
-    if ($.totalStorage("${app_name}_temp_query") != null && $.totalStorage("${app_name}_temp_query") != "") {
-      codeMirror.setValue($.totalStorage("${app_name}_temp_query"));
+  % if not (design and design.id) and not ( query_history and query_history.id ):
+    if ($.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query") != null && $.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query") != "") {
+      viewModel.queryEditorBlank(true);
+      codeMirror.setValue($.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query"));
     }
   % endif
 
   codeMirror.on("blur", function () {
     $(document.body).off("contextmenu");
   });
+
+  codeMirror.on("update", function () {
+    if (CURRENT_CODEMIRROR_SIZE == 100 && codeMirror.lineCount() > 7){
+      CURRENT_CODEMIRROR_SIZE = 270;
+      codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
+      reinitializeTableExtenders();
+    }
+  });
+
 });
 
-
-$(document).one('fetched.design', function () {
+var editables = function() {
   // Edit query name and description.
   $("#query-name").editable({
     validate: function (value) {
@@ -1187,9 +1595,25 @@ $(document).one('fetched.design', function () {
   });
 
   $(".fileChooser:not(:has(~ button))").after(getFileBrowseButton($(".fileChooser:not(:has(~ button))")));
-});
+};
 
+$(document).one('fetched.design', editables);
 
+$(document).one('fetched.query', editables);
+
+function isNumericColumn(type) {
+  return $.inArray(type, ['TINYINT_TYPE', 'SMALLINT_TYPE', 'INT_TYPE', 'BIGINT_TYPE', 'FLOAT_TYPE', 'DOUBLE_TYPE', 'DECIMAL_TYPE', 'TIMESTAMP_TYPE', 'DATE_TYPE']) > -1;
+}
+
+function isDateTimeColumn(type) {
+  return $.inArray(type, ['TIMESTAMP_TYPE', 'DATE_TYPE']) > -1;
+}
+
+function isStringColumn(type) {
+  return !isNumericColumn(type) && !isDateTimeColumn(type);
+}
+
+var map;
 var graphHasBeenPredicted = false;
 // Logs
 var logsAtEnd = true;
@@ -1207,11 +1631,15 @@ $(document).ready(function () {
     resizeLogs();
   });
 
-  $(document).on("shown", "a[data-toggle='tab']", function (e) {
+  $(document).on("shown", "a[data-toggle='tab']:not(.sidetab)", function (e) {
     if ($(e.target).attr("href") != "#results"){
       $($(e.target).attr("href")).css('height', 'auto');
       if ($(e.target).attr("href") == "#chart") {
+        logGA('results/chart');
         predictGraph();
+      }
+      if ($(e.target).attr("href") == "#resultTab") {
+        reinitializeTable();
       }
     } else {
       reinitializeTable();
@@ -1228,58 +1656,67 @@ $(document).ready(function () {
       [lats[0], lngs[0]] // south-west
     ]
   }
-  var map;
+
   function generateGraph(graphType) {
+    $("#chart").height(Math.max($(window).height() - $("#blueprint").offset().top + 30, 500));
     $("#chart .alert").addClass("hide");
     if (graphType != "") {
-      if (map != null) {
+      if (map != null){
         try {
           map.remove();
         }
-        catch (err) { // do nothing
+        catch (err) {
+          if (typeof console != "undefined") {
+            console.error(err);
+          }
         }
       }
-      $("#blueprintDownload").addClass("hide");
       $("#blueprint").attr("class", "").attr("style", "").empty();
       $("#blueprint").data("plugin_jHueBlueprint", null);
       if (graphType == $.jHueBlueprint.TYPES.MAP) {
+        L.DomUtil.get("blueprint")._leaflet = false;
         if ($("#blueprintLat").val() != "-1" && $("#blueprintLng").val() != "-1") {
           var _latCol = $("#blueprintLat").val() * 1;
           var _lngCol = $("#blueprintLng").val() * 1;
           var _descCol = $("#blueprintDesc").val() * 1;
           var _lats = [];
           var _lngs = [];
-          $(".resultTable>tbody>tr>td:nth-child(" + _latCol + ")").each(function (cnt) {
+          $("#resultTable>tbody>tr>td:nth-child(" + _latCol + ")").each(function (cnt) {
             _lats.push($.trim($(this).text()) * 1);
           });
-          $(".resultTable>tbody>tr>td:nth-child(" + _lngCol + ")").each(function (cnt) {
+          $("#resultTable>tbody>tr>td:nth-child(" + _lngCol + ")").each(function (cnt) {
             _lngs.push($.trim($(this).text()) * 1);
           });
-          //$("#blueprint").addClass("map");
           $("#blueprint").height($("#blueprint").parent().height() - 100);
-          map = L.map("blueprint").fitBounds(getMapBounds(_lats, _lngs));
+          try {
+            map = L.map("blueprint").fitBounds(getMapBounds(_lats, _lngs));
 
-          L.tileLayer("http://{s}.tile.osm.org/{z}/{x}/{y}.png", {
-            attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
-          }).addTo(map);
+            L.tileLayer("http://{s}.tile.osm.org/{z}/{x}/{y}.png", {
+              attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
 
-          $(".resultTable>tbody>tr>td:nth-child(" + _latCol + ")").each(function (cnt) {
-            if (cnt < 1000) {
-              if (_descCol != "-1") {
-                L.marker([$.trim($(this).text()) * 1, $.trim($(".resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _lngCol + ")").text()) * 1]).addTo(map).bindPopup($.trim($(".resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _descCol + ")").text()));
+            $("#resultTable>tbody>tr>td:nth-child(" + _latCol + ")").each(function (cnt) {
+              if (cnt < 1000) {
+                if (_descCol != "-1") {
+                  L.marker([$.trim($(this).text()) * 1, $.trim($("#resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _lngCol + ")").text()) * 1]).addTo(map).bindPopup($.trim($("#resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _descCol + ")").text()));
+                }
+                else {
+                  L.marker([$.trim($(this).text()) * 1, $.trim($("#resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _lngCol + ")").text()) * 1]).addTo(map);
+                }
               }
-              else {
-                L.marker([$.trim($(this).text()) * 1, $.trim($(".resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _lngCol + ")").text()) * 1]).addTo(map);
-              }
+            });
+          }
+          catch (err) {
+            if (typeof console != "undefined") {
+              console.error(err);
             }
-          });
-          if ($(".resultTable>tbody>tr>td:nth-child(" + _latCol + ")").length > 1000){
+          }
+          if ($("#resultTable>tbody>tr>td:nth-child(" + _latCol + ")").length > 1000){
             $("#chart .alert").removeClass("hide");
           }
-
         }
         else {
-          $("#blueprint").addClass("empty").text("${_("Please select the latitude and longitude columns.")}");
+          $("#blueprint").addClass("empty").css("text-align", "center").text("${_("Please select the latitude and longitude columns.")}");
         }
       }
       else {
@@ -1287,28 +1724,27 @@ $(document).ready(function () {
           var _x = $("#blueprintX").val() * 1;
           var _y = $("#blueprintY").val() * 1;
           var _data = [];
-          $(".resultTable>tbody>tr>td:nth-child(" + _x + ")").each(function (cnt) {
+          $("#resultTable>tbody>tr>td:nth-child(" + _x + ")").each(function (cnt) {
             if (cnt < 1000) {
-              _data.push([$.trim($(this).text()), $.trim($(".resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _y + ")").text()) * 1]);
+              _data.push([$.trim($(this).text()), $.trim($("#resultTable>tbody>tr:nth-child(" + (cnt + 1) + ")>td:nth-child(" + _y + ")").text()) * 1]);
             }
           });
-          if ($(".resultTable>tbody>tr>td:nth-child(" + _x + ")").length > 1000){
+          if ($("#resultTable>tbody>tr>td:nth-child(" + _x + ")").length > 1000){
             $("#chart .alert").removeClass("hide");
           }
           $("#blueprint").jHueBlueprint({
             data: _data,
-            label: $(".resultTable>thead>tr>th:nth-child(" + _y + ")").text(),
+            label: $("#resultTable>thead>tr>th:nth-child(" + _y + ")").text(),
             type: graphType,
             color: $.jHueBlueprint.COLORS.BLUE,
             isCategories: true,
             fill: true,
             enableSelection: false,
-            height: 250
+            height: $("#blueprint").parent().height() - 100
           });
           if (_data.length > 30){
             $(".flot-x-axis .flot-tick-label").hide();
           }
-          $("#blueprintDownload").removeClass("hide");
         }
         else {
           $("#blueprint").addClass("empty").text("${_("Please select the columns you would like to see in this chart.")}");
@@ -1316,10 +1752,6 @@ $(document).ready(function () {
       }
     }
   }
-
-  $("#blueprintDownload").on("click", function(){
-    window.open($(".flot-base")[0].toDataURL());
-  });
 
   function getGraphType() {
     var _type = "";
@@ -1340,20 +1772,18 @@ $(document).ready(function () {
     if (!graphHasBeenPredicted) {
       graphHasBeenPredicted = true;
       var _firstAllString, _firstAllNumeric;
-      for (var i = 1; i < $(".resultTable>thead>tr>th").length; i++) {
-        var _isNumeric = true;
-        $(".resultTable>tbody>tr>td:nth-child(" + (i + 1) + ")").each(function (cnt) {
-          if (!$.isNumeric($.trim($(this).text()))) {
-            _isNumeric = false;
+      var _cols = viewModel.design.results.columns();
+      $(_cols).each(function (cnt, col) {
+        if (cnt > 0){
+          if (_firstAllString == null && !isNumericColumn(col.type)) {
+            _firstAllString = cnt + 1;
           }
-        });
-        if (_firstAllString == null && !_isNumeric) {
-          _firstAllString = i + 1;
+          if (_firstAllNumeric == null && isNumericColumn(col.type)) {
+            _firstAllNumeric = cnt + 1;
+          }
         }
-        if (_firstAllNumeric == null && _isNumeric) {
-          _firstAllNumeric = i + 1;
-        }
-      }
+      });
+
       if (_firstAllString != null && _firstAllNumeric != null) {
         $("#blueprintBars").addClass("active");
         $("#blueprintAxis").removeClass("hide");
@@ -1385,7 +1815,7 @@ $(document).ready(function () {
     generateGraph($.jHueBlueprint.TYPES.MAP)
   });
 
-  $("#log pre").scroll(function () {
+  $("#log pre:eq(1)").scroll(function () {
     if ($(this).scrollTop() + $(this).height() + 20 >= $(this)[0].scrollHeight) {
       logsAtEnd = true;
     }
@@ -1395,18 +1825,29 @@ $(document).ready(function () {
   });
 
   viewModel.design.watch.logs.subscribe(function(val){
-    var _logsEl = $("#log pre");
+    var _logsEl = $("#log pre:eq(1)");
 
     if (logsAtEnd && _logsEl[0]) {
       _logsEl.scrollTop(_logsEl[0].scrollHeight - _logsEl.height());
     }
+    window.setTimeout(resizeLogs, 10);
+  });
+
+  viewModel.design.results.columns.subscribe(function(val){
+    $("*[rel=columntooltip]").tooltip({
+      delay: {show: 500}
+    });
+    $("a[data-row-selector='true']").jHueRowSelector();
   });
 });
 
 function resizeLogs() {
   // Use fixed subtraction since logs aren't always visible.
-  $("#log").height($(window).height() - $("#log pre").offset().top - 10);
-  $("#log pre").css("overflow", "auto").height($(window).height() - $("#log pre").offset().top - 50);
+  if ($("#log pre:eq(1)").length > 0) {
+    var _height = Math.max($(window).height() - $("#log pre:eq(1)").offset().top, 250);
+    $("#log").height(_height - 10);
+    $("#log pre:eq(1)").css("overflow", "auto").height(_height - 50);
+  }
 }
 
 // Result Datatable
@@ -1420,21 +1861,30 @@ function cleanResultsTable() {
   }
 }
 
+function addRowNumberToResults(data, startIndex) {
+  var _tmpdata = [];
+  $(data).each(function(cnt, item){
+    item.unshift(cnt + startIndex);
+    _tmpdata.push(item);
+  });
+  return _tmpdata;
+}
+
 function addResults(viewModel, dataTable, index, pageSize) {
   if (viewModel.hasMoreResults() && index + pageSize > viewModel.design.results.rows().length) {
     $(document).one('fetched.results', function () {
-      $.totalStorage("${app_name}_temp_query", null);
-      dataTable.fnAddData(viewModel.design.results.rows.slice(index, index + pageSize));
+      $.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query", null);
+      dataTable.fnAddData(addRowNumberToResults(viewModel.design.results.rows.slice(index, index + pageSize), index));
     });
     viewModel.fetchResults();
   } else {
-    dataTable.fnAddData(viewModel.design.results.rows.slice(index, index + pageSize));
+    dataTable.fnAddData(addRowNumberToResults(viewModel.design.results.rows.slice(index, index + pageSize), index));
   }
 }
 
 function resultsTable(e, data) {
   if (!dataTable && viewModel.design.results.columns().length > 0) {
-    dataTable = $(".resultTable").dataTable({
+    dataTable = $("#resultTable").dataTable({
       "bPaginate": false,
       "bLengthChange": false,
       "bInfo": false,
@@ -1445,20 +1895,7 @@ function resultsTable(e, data) {
         "sZeroRecords": "${_('No matching records')}"
       },
       "fnDrawCallback": function (oSettings) {
-        reinitializeTable();
-      },
-      "fnRowCallback": function (nRow, aData, iDisplayIndex, iDisplayIndexFull) {
-        // Make sure null values are seen as NULL and are escaped.
-        var tmpDiv = $('<div />');
-        for (var j = 0; j < aData.length; ++j) {
-          var cell = $(nRow).find('td:eq(' + j + ')');
-          if (aData[j] == null) {
-            cell.html("NULL");
-          } else {
-            cell.html(tmpDiv.text(cell.html()).html());
-          }
-        }
-        return nRow;
+        reinitializeTableExtenders();
       },
       "aoColumnDefs": [
         {
@@ -1479,29 +1916,33 @@ function resultsTable(e, data) {
     reinitializeTable();
     var _options = '<option value="-1">${ _("Please select a column")}</option>';
     $(viewModel.design.results.columns()).each(function(cnt, item){
-      _options += '<option value="'+(cnt + 1)+'">'+ item.name +'</option>';
+      if (cnt > 0){
+        _options += '<option value="'+(cnt + 1)+'">'+ item.name +'</option>';
+      }
     });
     $(".blueprintSelect").html(_options);
 
     // Automatic results grower
-    var dataTableEl = $(".dataTables_wrapper");
+    var dataTableEl = $("#results .dataTables_wrapper");
     var index = 0;
     var pageSize = 100;
+    var _scrollTimeout = -1;
     dataTableEl.on("scroll", function (e) {
-      if (dataTableEl.scrollTop() + dataTableEl.outerHeight() + 20 > dataTableEl[0].scrollHeight && dataTable) {
-        dataTableEl.animate({opacity: '0.55'}, 200);
-        $(".spinner").show();
-        addResults(viewModel, dataTable, index, pageSize);
-        index += pageSize;
-        $(".spinner").hide();
-        dataTableEl.animate({opacity: '1'}, 50);
-      }
+      var _lastScrollPosition = dataTableEl.data("scrollPosition") != null ? dataTableEl.data("scrollPosition") : 0;
+      window.clearTimeout(_scrollTimeout);
+      _scrollTimeout = window.setTimeout(function(){
+        dataTableEl.data("scrollPosition", dataTableEl.scrollTop());
+        if (_lastScrollPosition !=  dataTableEl.scrollTop() && dataTableEl.scrollTop() + dataTableEl.outerHeight() + 20 > dataTableEl[0].scrollHeight && dataTable) {
+          dataTableEl.animate({opacity: '0.55'}, 200);
+          addResults(viewModel, dataTable, index, pageSize);
+          index += pageSize;
+          dataTableEl.animate({opacity: '1'}, 50);
+        }
+      }, 100);
     });
     addResults(viewModel, dataTable, index, pageSize);
     index += pageSize;
-    dataTableEl.jHueScrollUp({
-      secondClickScrollToTop: true
-    });
+    dataTableEl.jHueScrollUp();
   }
 }
 
@@ -1512,26 +1953,36 @@ $(document).on('fetched.results', resultsTable);
 var selectedLine = -1;
 var errorWidgets = [];
 
+function clearErrorWidgets() {
+  $(".jHueTableExtenderClonedContainer").hide();
+  $.each(errorWidgets, function(index, errorWidget) {
+    errorWidget.clear();
+  });
+  errorWidgets = [];
+}
+
+$(document).on('execute.query', clearErrorWidgets);
+
 $(document).on('error.query', function () {
   $.each(errorWidgets, function(index, el) {
     $(el).remove();
     errorWidgets = [];
   });
 
-  // Move error to codeMirror if we konw the line number
+  // Move error to codeMirror if we know the line number
   $.each($(".queryErrorMessage"), function(index, el) {
     var err = $(el).text().toLowerCase();
     var firstPos = err.indexOf("line");
     if (firstPos > -1) {
       selectedLine = $.trim(err.substring(err.indexOf(" ", firstPos), err.indexOf(":", firstPos))) * 1;
       errorWidgets.push(
-         codeMirror.addLineWidget(
-             selectedLine - 1,
-             $("<div>").addClass("editorError").html("<i class='fa fa-exclamation-circle'></i> " + err)[0], {
-                 coverGutter: true,
-                 noHScroll: true
-             }
-         )
+        codeMirror.addLineWidget(
+          selectedLine - 1,
+          $("<div>").addClass("editorError").html("<i class='fa fa-exclamation-circle'></i> " + err)[0], {
+            coverGutter: true,
+            noHScroll: true
+          }
+        )
       );
       $(el).hide();
     }
@@ -1540,6 +1991,8 @@ $(document).on('error.query', function () {
   if ($(".queryErrorMessage:hidden").length == $(".queryErrorMessage").length) {
     $(".queryErrorMessage").parent().parent().hide();
   }
+
+  reinitializeTableExtenders();
 });
 
 
@@ -1549,6 +2002,7 @@ function trySaveDesign() {
   viewModel.design.query.value(query);
   if (viewModel.design.id() && viewModel.design.id() != -1) {
     viewModel.saveDesign();
+    logGA('design/save');
   }
 }
 
@@ -1564,6 +2018,7 @@ function trySaveAsDesign() {
     viewModel.saveDesign();
     $('#saveas-query-name').removeClass('error');
     $('#saveAs').modal('hide');
+    logGA('design/save-as');
   } else if (viewModel.design.name()) {
     $.jHueNotify.error("${_('No query provided to save.')}");
     $('#saveAs').modal('hide');
@@ -1573,11 +2028,21 @@ function trySaveAsDesign() {
 }
 
 function saveResultsModal() {
+  $("#saveResultsModal .loader").hide();
   $('#saveResultsModal').modal('show');
 }
 
 function trySaveResults() {
-  viewModel.saveResults();
+  var deferred = viewModel.saveResults();
+  if (deferred) {
+    $("#saveResultsModal button.btn-primary").button('loading');
+    $("#saveResultsModal .loader").show();
+    deferred.done(function() {
+      $("#saveResultsModal button.btn-primary").button('reset');
+      $("#saveResultsModal .loader").hide();
+    });
+  }
+  logGA('results/save');
 }
 
 $(document).on('saved.results', function() {
@@ -1587,18 +2052,45 @@ $(document).on('saved.results', function() {
 
 // Querying and click events.
 function tryExecuteQuery() {
+  $(".jHueTableExtenderClonedContainer").hide();
   $(".tooltip").remove();
   var query = getHighlightedQuery() || codeMirror.getValue();
   viewModel.design.query.value(query);
-  if ($(".dataTables_wrapper").length > 0) { // forces results to be up
-    $(".dataTables_wrapper").scrollTop(0);
+  if ($("#results .dataTables_wrapper").length > 0) { // forces results to be up
+    $("#results .dataTables_wrapper").scrollTop(0);
   }
+  if ($("#recentQueries .dataTables_wrapper").length > 0) { // forces results to be up
+    $("#recentQueries .dataTables_wrapper").scrollTop(0);
+  }
+  renderRecent();
+  clickHard('.resultsContainer .nav-tabs a[href="#log"]');
   graphHasBeenPredicted = false;
   if (viewModel.design.isParameterized()) {
     viewModel.fetchParameters();
   } else {
     viewModel.executeQuery();
   }
+
+  logGA('query/execute');
+}
+
+function tryExecuteNextStatement() {
+  var query = getHighlightedQuery() || codeMirror.getValue();
+
+  // If we highlight a part of query, we update the query and restart the query history
+  // In the other case we update the query but continue at the same statement we were
+  if (viewModel.design.query.value() != query) {
+    viewModel.design.query.value(query);
+    if (getHighlightedQuery()) {
+      viewModel.executeQuery();
+    } else {
+      viewModel.executeNextStatement();
+    }
+  } else {
+    viewModel.executeNextStatement();
+  }
+
+  logGA('query/execute_next');
 }
 
 function tryExecuteParameterizedQuery() {
@@ -1606,13 +2098,14 @@ function tryExecuteParameterizedQuery() {
   viewModel.executeQuery();
   routie('query');
 }
-;
 
 function tryExplainQuery() {
   $(".tooltip").remove();
   var query = getHighlightedQuery() || codeMirror.getValue();
   viewModel.design.query.value(query);
   viewModel.explainQuery();
+
+  logGA('query/explain');
 }
 
 function tryExplainParameterizedQuery() {
@@ -1620,7 +2113,6 @@ function tryExplainParameterizedQuery() {
   viewModel.explainQuery();
   routie('query');
 }
-;
 
 function tryCancelQuery() {
   $(".tooltip").remove();
@@ -1628,8 +2120,8 @@ function tryCancelQuery() {
 }
 
 function createNewQuery() {
-  $.totalStorage("${app_name}_temp_query", null);
-  location.href="${ url('beeswax:execute_query') }";
+  $.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query", null);
+  location.href="${ url(app_name + ':execute_query') }";
 }
 
 function checkLastDatabase(server, database) {
@@ -1647,16 +2139,30 @@ function getLastDatabase(server) {
 
 // Server error handling.
 $(document).on('server.error', function (e, data) {
-  $(document).trigger('error', "${_('Server error occured: ')}" + data.message ? data.message : data.error);
+  $(document).trigger('error', "${_('Server error occurred: ')}" + data.message ? data.message : data.error);
 });
 $(document).on('server.unmanageable_error', function (e, responseText) {
-  $(document).trigger('error', "${_('Unmanageable server error occured: ')}" + responseText);
+  $(document).trigger('error', "${_('Unmanageable server error occurred: ')}" + responseText);
 });
 
 // Other
 $(document).on('saved.design', function (e, id) {
-  $(document).trigger('info', "${'Query saved.'}");
-  window.location.href = "/beeswax/execute/design/" + id;
+  $(document).trigger('info', "${_('Query saved.')}");
+  window.location.href = "/${ app_name }/execute/design/" + id;
+});
+$(document).on('error_save.design', function (e, message) {
+  var _message = "${_('Could not save design')}";
+  if (message) {
+    _message += ": " + message;
+  }
+  $(document).trigger('error', _message);
+});
+$(document).on('error_save.results', function (e, message) {
+  var _message = "${_('Could not save results')}";
+  if (message) {
+    _message += ": " + message;
+  }
+  $(document).trigger('error', _message);
 });
 $(document).on('error_cancel.query', function (e, message) {
   $(document).trigger("error", "${ _('Problem: ') }" + message);
@@ -1697,7 +2203,27 @@ $(document).ready(function () {
     'title': "${_('Did you know?')}",
     'content': $("#help-content").html(),
     'trigger': 'hover',
+    'placement': 'left',
     'html': true
+  });
+
+  $("#hdfs-directory-help").popover({
+    'title': "${_('Did you know?')}",
+    'content': $("#hdfs-directory-help-content").html(),
+    'trigger': 'hover',
+    'placement': 'right',
+    'html': true
+  });
+
+  $(document).on('click', '#save-results-simple', function() {
+    $('#save-results-advanced').removeClass('hide');
+    $('#save-results-simple').addClass('hide');
+    $('#saveResultsForm .advanced').addClass('hide');
+  });
+  $(document).on('click', '#save-results-advanced', function() {
+    $('#save-results-advanced').addClass('hide');
+    $('#save-results-simple').removeClass('hide');
+    $('#saveResultsForm .advanced').removeClass('hide');
   });
 
   $(document).on("change", ".settingsField", function(){
@@ -1749,7 +2275,11 @@ $(document).ready(function () {
     'trigger': 'hover',
     'html': true
   });
+});
+% endif
 
+% if ( app_name == 'beeswax' and beeswax_conf.CLOSE_QUERIES.get() ) or ( app_name == 'impala' and impala_conf.CLOSE_QUERIES.get() ):
+$(document).ready(function () {
   $(document).on('explain.query', function() {
     viewModel.closeQuery();
   });
@@ -1757,14 +2287,26 @@ $(document).ready(function () {
   $(document).on('execute.query', function() {
     viewModel.closeQuery();
   });
+
+  // Tricks for not triggering the closing of the query on download
+  $("a.download").hover(function(){
+      window.onbeforeunload = null;
+    },function() {
+      window.onbeforeunload = $(window).data('beforeunload');
+    }
+  );
 });
 
+// Close the query when leaving the page, backup for later when disabling the close before downloading results.
 window.onbeforeunload = function(e) {
   viewModel.closeQuery();
 };
+$(window).data('beforeunload', window.onbeforeunload);
+
 % endif
 
-$(".pathChooser:not(:has(~ button))").after(getFileAndFolderBrowseButton($(".pathChooser:not(:has(~ button))"), true));
+$(".folderChooser:not(:has(~ button))").after(getFolderBrowseButton($(".folderChooser:not(:has(~ button))"), true));
+$(".pathChooser:not(:has(~ button))").after(getPathBrowseButton($(".pathChooser:not(:has(~ button))"), true));
 
 
 // Routie
@@ -1773,9 +2315,10 @@ $(document).ready(function () {
     $('#advanced-settings').show();
     $('#navigator').show();
     $('#queryContainer').show();
+    $('#resizePanel').show();
     $('a[href="#query"]').parent().show();
-    if (!$('#querySide').hasClass('span8')) {
-      $('#querySide').addClass('span8');
+    if (!$('#querySide').hasClass('span10')) {
+      $('#querySide').addClass('span10');
     }
   }
 
@@ -1783,50 +2326,46 @@ $(document).ready(function () {
     $('#advanced-settings').hide();
     $('#navigator').hide();
     $('#queryContainer').hide();
+    $('#resizePanel').hide();
     $('a[href="#query"]').parent().hide();
-    if ($('#querySide').hasClass('span8')) {
-      $('#querySide').removeClass('span8');
+    $('a[href="#recentTab"]').parent().hide();
+    if ($('#querySide').hasClass('span10')) {
+      $('#querySide').removeClass('span10');
     }
   }
 
   function queryPage() {
     queryPageComponents();
-    $('.resultsContainer').hide();
     $('.resultsContainer .watch-query').hide();
     $('.resultsContainer .view-query-results').hide();
   }
 
   function queryLogPage() {
     queryPageComponents();
-    $('.resultsContainer').show();
     $('.resultsContainer .watch-query').show();
     $('.resultsContainer .view-query-results').hide();
   }
 
   function queryResultsPage() {
     queryPageComponents();
-    $('.resultsContainer').show();
     $('.resultsContainer .watch-query').hide();
     $('.resultsContainer .view-query-results').show();
   }
 
   function parametersPage() {
     queryPageComponents();
-    $('.resultsContainer').hide();
     $('.resultsContainer .watch-query').hide();
     $('.resultsContainer .view-query-results').hide();
   }
 
   function watchLogsPage() {
     watchPageComponents();
-    $('.resultsContainer').show();
     $('.resultsContainer .watch-query').show();
     $('.resultsContainer .view-query-results').hide();
   }
 
   function watchResultsPage() {
     watchPageComponents();
-    $('.resultsContainer').show();
     $('.resultsContainer .watch-query').hide();
     $('.resultsContainer .view-query-results').show();
   }
@@ -1835,8 +2374,8 @@ $(document).ready(function () {
     'query': function () {
       showSection('query-editor');
       queryPage();
-
-      codeMirror.setSize("99%", $(window).height() - 270 - $("#queryPane .alert-error").outerHeight() - $(".nav-tabs").outerHeight());
+      codeMirror.setSize("99%", CURRENT_CODEMIRROR_SIZE);
+      placeResizePanelHandle();
     },
     'query/execute/params': function () {
       if (viewModel.design.parameters().length == 0) {
@@ -1863,18 +2402,17 @@ $(document).ready(function () {
       queryLogPage();
 
       clickHard('.resultsContainer .nav-tabs a[href="#log"]');
-
-      codeMirror.setSize("99%", 100);
     },
     'query/results': function () {
       showSection('query-editor');
       queryResultsPage();
 
-      $("html, body").animate({ scrollTop: ($(".resultsContainer").position().top - 80) + "px" });
-
-      codeMirror.setSize("99%", 100);
-
       clickHard('.resultsContainer .nav-tabs a[href="#results"]');
+
+      renderRecent();
+      placeResizePanelHandle();
+
+      logGA('query/results');
     },
     'query/explanation': function () {
       if (! viewModel.design.results.explanation()) {
@@ -1885,20 +2423,22 @@ $(document).ready(function () {
       queryResultsPage();
 
       clickHard('.resultsContainer .nav-tabs a[href="#explanation"]');
-
-      codeMirror.setSize("99%", 100);
     },
     'watch/logs': function() {
       showSection('query-editor');
       watchLogsPage();
 
       clickHard('.resultsContainer .nav-tabs a[href="#log"]');
+
+      logGA('watch/logs');
     },
     'watch/results': function() {
       showSection('query-editor');
       watchResultsPage();
 
       clickHard('.resultsContainer .nav-tabs a[href="#results"]');
+
+      logGA('watch/results');
     },
     '*': function () {
       routie('query');
@@ -1920,8 +2460,10 @@ function queryEvents() {
     routie('query/explanation');
   });
   $(document).on('watched.query', function (e, data) {
-    if (data.status && data.status && data.status != 0) {
-      viewModel.design.watch.errors.push(data.error || data.message);
+    if (data.status != 2) {
+      if (data.status && data.status && data.status != 0) {
+        viewModel.design.watch.errors.push(data.error || data.message);
+      }
     }
     routie('query/logs');
   });
@@ -1954,31 +2496,69 @@ function watchEvents() {
 function cacheQueryTextEvents() {
   codeMirror.on("change", function () {
     $(".query").val(codeMirror.getValue());
-    $.totalStorage("${app_name}_temp_query", codeMirror.getValue());
+    $.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_temp_query", codeMirror.getValue());
   });
+}
+
+function databaseCacheWriter() {
+  $(".chosen-select").chosen().change(function () {
+    $.totalStorage(hac_getTotalStorageUserPrefix() + "${app_name}_last_database", viewModel.database());
+  });
+}
+
+function loadEditor() {
+  $(document).one('fetched.databases', databaseCacheWriter);
+  viewModel.fetchDatabases();
+}
+
+function loadDesign(design_id) {
+  $(document).one('fetched.databases', function() {
+    viewModel.design.id(design_id);
+    viewModel.fetchDesign();
+  });
+
+  $(document).one('fetched.design', databaseCacheWriter);
+
+  var codeMirrorSubscription = viewModel.design.query.value.subscribe(function(value) {
+    viewModel.queryEditorBlank(true);
+    codeMirror.setValue(value);
+    codeMirrorSubscription.dispose();
+  });
+
+  loadEditor();
+}
+
+function loadQueryHistory(query_history_id) {
+  $(document).one('fetched.databases', function() {
+    viewModel.design.history.id(query_history_id);
+    viewModel.fetchQueryHistory();
+  });
+
+  $(document).one('fetched.query', databaseCacheWriter);
+
+  var codeMirrorSubscription = viewModel.design.query.value.subscribe(function(value) {
+    viewModel.queryEditorBlank(true);
+    codeMirror.setValue(value);
+    codeMirrorSubscription.dispose();
+  });
+
+  loadEditor();
 }
 
 // Knockout
 viewModel = new BeeswaxViewModel("${app_name}");
 % if query_history:
-  viewModel.design.history.id(${query_history.id});
-  viewModel.fetchQueryHistory();
+  loadQueryHistory(${query_history.id});
 % elif design.id:
-  viewModel.design.id(${design.id});
-  viewModel.fetchDesign();
+  loadDesign(${design.id});
+% else:
+  $(document).ready(cacheQueryTextEvents);
+  loadEditor();
 % endif
-if (viewModel.design.id() > 0 || viewModel.design.history.id() > 0) {
-  // Code mirror and ko.
-  var codeMirrorSubscription = viewModel.design.query.value.subscribe(function(value) {
-    codeMirror.setValue(value);
-    codeMirrorSubscription.dispose();
-  });
-}
 viewModel.design.fileResources.values.subscribe(function() {
   // File chooser button for file resources.
   $(".fileChooser:not(:has(~ button))").after(getFileBrowseButton($(".fileChooser:not(:has(~ button))")));
 });
-viewModel.fetchDatabases();
 ko.applyBindings(viewModel);
 
 
@@ -2005,13 +2585,18 @@ ko.applyBindings(viewModel);
     viewModel.watchQueryLoop();
     cacheQueryTextEvents();
   });
+% elif action == 'editor-expired-results':
+  $(document).ready(queryEvents);
+  $(document).one('fetched.query', function(e) {
+    viewModel.design.results.expired(true);
+    $(document).trigger('fetched.results', [ [] ]);
+    cacheQueryTextEvents();
+  });
 % else:
   $(document).ready(queryEvents);
-  $(document).ready(cacheQueryTextEvents);
 % endif
 
-// @TODO: Stop operation
-// @TODO: Re-add download query for impala
 </script>
 
 ${ commonfooter(messages) | n,unicode }
+

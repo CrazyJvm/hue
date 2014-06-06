@@ -42,6 +42,9 @@
   # Enable or disable backtrace for server error
   ## http_500_debug_mode=true
 
+  # Enable or disable memory profiling.
+  ## memory_profiler=false
+
   # Server email for internal error messages
   ## django_server_email='hue@localhost.localdomain'
 
@@ -65,6 +68,13 @@
   # Filename of SSL RSA Private Key
   ## ssl_private_key=
 
+  # List of allowed and disallowed ciphers in cipher list format.
+  # See http://www.openssl.org/docs/apps/ciphers.html for more information on cipher list format.
+  ## ssl_cipher_list=DEFAULT:!aNULL:!eNULL:!LOW:!EXPORT:!SSLv2
+
+  # LDAP password of the hue user used for LDAP authentications. For example for LDAP Authentication with HiveServer2.
+  # ldap_password=
+
   # Default encoding for site data
   ## default_site_encoding=utf-8
 
@@ -72,14 +82,30 @@
   # Use Google Analytics to see how many times an application or specific section of an application is used, nothing more.
   ## collect_usage=true
 
+  # Support for HTTPS termination at the load-balancer level with SECURE_PROXY_SSL_HEADER.
+  ## secure_proxy_ssl_header=false
+
   # Comma-separated list of Django middleware classes to use.
   # See https://docs.djangoproject.com/en/1.4/ref/middleware/ for more details on middlewares in Django.
   ## middleware=desktop.auth.backend.LdapSynchronizationBackend
 
-  ## Comma-separated list of regular expressions, which match the redirect URL.
-  ## For example, to restrict to your local domain and FQDN, the following value can be used:
-  ##   ^\/.*$,^http:\/\/www.mydomain.com\/.*$
-  # redirect_whitelist=
+  # Comma-separated list of regular expressions, which match the redirect URL.
+  # For example, to restrict to your local domain and FQDN, the following value can be used:
+  # ^\/.*$,^http:\/\/www.mydomain.com\/.*$
+  ## redirect_whitelist=
+
+  # Comma separated list of apps to not load at server startup.
+  # e.g.: pig,zookeeper
+  ## app_blacklist=
+
+  # The directory where to store the auditing logs. Auditing is disable if the value is empty.
+  # e.g. /var/log/hue/audit.log
+  ## audit_event_log_dir=
+
+  # Size in KB/MB/GB for audit log to rollover.
+  ## audit_log_max_file_size=100MB
+
+#poll_enabled=false
 
   # Administrators
   # ----------------
@@ -108,10 +134,13 @@
     # - desktop.auth.backend.PamBackend
     # - desktop.auth.backend.SpnegoDjangoBackend
     # - desktop.auth.backend.RemoteUserDjangoBackend
-    # - desktop.auth.backend.OAuthBackend
     # - libsaml.backend.SAML2Backend
+    # - libopenid.backend.OpenIDBackend
+    # - liboauth.backend.OAuthBackend
+    #     (New oauth, support Twitter, Facebook, Google+ and Linkedin
     ## backend=desktop.auth.backend.AllowFirstUserDjangoBackend
 
+    # The service to use when querying PAM.
     ## pam_service=login
 
     # When using the desktop.auth.backend.RemoteUserDjangoBackend, this sets
@@ -124,15 +153,27 @@
     # Defaults to HTTP_REMOTE_USER
     ## remote_user_header=HTTP_REMOTE_USER
 
+    # Ignore the case of usernames when searching for existing users.
+    # Only supported in remoteUserDjangoBackend.
+    ## ignore_username_case=false
+
+    # Ignore the case of usernames when searching for existing users to authenticate with.
+    # Only supported in remoteUserDjangoBackend.
+    ## force_username_lowercase=false
+
+    # Users will expire after they have not logged in for 'n' amount of seconds.
+    # A negative number means that users will never expire.
+    ## expires_after=-1
+
+    # Apply 'expires_after' to superusers.
+    ## expire_superusers=true
+
   # Configuration options for connecting to LDAP and Active Directory
   # -------------------------------------------------------------------
   [[ldap]]
 
     # The search base for finding users and groups
     ## base_dn="DC=mycompany,DC=com"
-
-    # The NT domain to connect to (only for use with Active Directory)
-    ## nt_domain=mycompany.com
 
     # URL of the LDAP server
     ## ldap_url=ldap://auth.mycompany.com
@@ -161,6 +202,9 @@
     # For use when using LdapBackend for Hue authentication
     ## create_users_on_login = true
 
+    # Synchronize a users groups when they login
+    ## sync_groups_on_login=false
+
     # Ignore the case of usernames when searching for existing users in Hue.
     ## ignore_username_case=false
 
@@ -170,6 +214,12 @@
     # Use search bind authentication.
     ## search_bind_authentication=true
 
+    # Choose which kind of subgrouping to use: nested or suboordinate (deprecated).
+    ## subgroups=suboordinate
+
+    # Define the number of levels to search for nested members.
+    ## nested_members_search_depth=10
+
     [[[users]]]
 
       # Base filter for searching for users
@@ -178,13 +228,62 @@
       # The username attribute in the LDAP schema
       ## user_name_attr=sAMAccountName
 
-      [[[groups]]]
+    [[[groups]]]
 
       # Base filter for searching for groups
       ## group_filter="objectclass=*"
 
       # The username attribute in the LDAP schema
       ## group_name_attr=cn
+
+    [[[ldap_servers]]]
+
+      ## [[[[mycompany]]]]
+
+        # The search base for finding users and groups
+        ## base_dn="DC=mycompany,DC=com"
+
+        # URL of the LDAP server
+        ## ldap_url=ldap://auth.mycompany.com
+
+        # A PEM-format file containing certificates for the CA's that
+        # Hue will trust for authentication over TLS.
+        # The certificate for the CA that signed the
+        # LDAP server certificate must be included among these certificates.
+        # See more here http://www.openldap.org/doc/admin24/tls.html.
+        ## ldap_cert=
+        ## use_start_tls=true
+
+        # Distinguished name of the user to bind as -- not necessary if the LDAP server
+        # supports anonymous searches
+        ## bind_dn="CN=ServiceAccount,DC=mycompany,DC=com"
+
+        # Password of the bind user -- not necessary if the LDAP server supports
+        # anonymous searches
+        ## bind_password=
+
+        # Pattern for searching for usernames -- Use <username> for the parameter
+        # For use when using LdapBackend for Hue authentication
+        ## ldap_username_pattern="uid=<username>,ou=People,dc=mycompany,dc=com"
+
+        ## Use search bind authentication.
+        ## search_bind_authentication=true
+
+        ## [[[[[users]]]]]
+
+          # Base filter for searching for users
+          ## user_filter="objectclass=Person"
+
+          # The username attribute in the LDAP schema
+          ## user_name_attr=sAMAccountName
+
+        ## [[[[[groups]]]]]
+
+          # Base filter for searching for groups
+          ## group_filter="objectclass=groupOfNames"
+
+          # The username attribute in the LDAP schema
+          ## group_name_attr=cn
 
   # Configuration options for specifying the Desktop Database.  For more info,
   # see http://docs.djangoproject.com/en/1.1/ref/settings/#database-engine
@@ -208,7 +307,8 @@
   # ------------------------------------------------------------------------
   [[session]]
     # The cookie containing the users' session ID will expire after this amount of time in seconds.
-    ## ttl=60*60*24*14
+    # Default is 2 weeks.
+    ## ttl=1209600
 
     # The cookie containing the users' session ID will be secure.
     # Should only be enabled with HTTPS.
@@ -250,7 +350,7 @@
     ## kinit_path=/path/to/kinit
 
 
-  # Configuration options for using OAuthBackend login
+  # Configuration options for using OAuthBackend (Core) login
   # ------------------------------------------------------------------------
   [[oauth]]
     # The Consumer key of the application
@@ -322,7 +422,7 @@
 ###########################################################################
 
 [libopenid]
-  # (Required) OpenId SSO endpoint url. 
+  # (Required) OpenId SSO endpoint url.
   ## server_endpoint_url=https://www.google.com/accounts/o8/id
 
   # OpenId 1.1 identity url prefix to be used instead of SSO endpoint url
@@ -335,6 +435,67 @@
   # Use email for username
   ## use_email_for_username=true
 
+
+###########################################################################
+# Settings to configure OAuth
+###########################################################################
+
+[liboauth]
+  # NOTE:
+  # To work, each of the active (i.e. uncommented) service must have
+  # applications created on the social network.
+  # Then the "consumer key" and "consumer secret" must be provided here.
+  #
+  # The addresses where to do so are:
+  # Twitter:  https://dev.twitter.com/apps
+  # Google+ : https://cloud.google.com/
+  # Facebook: https://developers.facebook.com/apps
+  # Linkedin: https://www.linkedin.com/secure/developer
+  #
+  # Additionnaly, the following must be set in the application settings:
+  # Twitter:  Callback URL (aka Redirect URL) must be set to http://YOUR_HUE_IP_OR_DOMAIN_NAME/oauth/social_login/oauth_authenticated
+  # Google+ : CONSENT SCREEN must have email address
+  # Facebook: Sandbox Mode must be DISABLED
+  # Linkedin: "In OAuth User Agreement", r_emailaddress is REQUIRED
+
+  # The Consumer key of the application
+  ## consumer_key_twitter=
+  ## consumer_key_google=
+  ## consumer_key_facebook=
+  ## consumer_key_linkedin=
+
+  # The Consumer secret of the application
+  ## consumer_secret_twitter=
+  ## consumer_secret_google=
+  ## consumer_secret_facebook=
+  ## consumer_secret_linkedin=
+
+  # The Request token URL
+  ## request_token_url_twitter=https://api.twitter.com/oauth/request_token
+  ## request_token_url_google=https://accounts.google.com/o/oauth2/auth
+  ## request_token_url_linkedin=https://www.linkedin.com/uas/oauth2/authorization
+  ## request_token_url_facebook=https://graph.facebook.com/oauth/authorize
+
+  # The Access token URL
+  ## access_token_url_twitter=https://api.twitter.com/oauth/access_token
+  ## access_token_url_google=https://accounts.google.com/o/oauth2/token
+  ## access_token_url_facebook=https://graph.facebook.com/oauth/access_token
+  ## access_token_url_linkedin=https://api.linkedin.com/uas/oauth2/accessToken
+
+  # The Authenticate URL
+  ## authenticate_url_twitter=https://api.twitter.com/oauth/authorize
+  ## authenticate_url_google=https://www.googleapis.com/oauth2/v1/userinfo?access_token=
+  ## authenticate_url_facebook=https://graph.facebook.com/me?access_token=
+  ## authenticate_url_linkedin=https://api.linkedin.com/v1/people/~:(email-address)?format=json&oauth2_access_token=
+
+  # Username Map. Json Hash format.
+  # Replaces username parts in order to simplify usernames obtained
+  # Example: {"@sub1.domain.com":"_S1", "@sub2.domain.com":"_S2"}
+  # converts 'email@sub1.domain.com' to 'email_S1'
+  ## username_map={}
+
+  # Whitelisted domains (only applies to Google OAuth). CSV format.
+  ## whitelisted_domains_google=
 
 ###########################################################################
 # Settings for the RDBMS application
@@ -508,6 +669,13 @@
       # Enter the host on which you are running the failover JobTracker
       # jobtracker_host=localhost-ha
 
+###########################################################################
+# Settings to configure the Filebrowser app
+###########################################################################
+
+[filebrowser]
+  # Location on local filesystem where the uploaded archives are temporary stored.
+  ## archive_upload_tempdir=/tmp
 
 ###########################################################################
 # Settings to configure liboozie
@@ -542,6 +710,9 @@
   # Maximum of Oozie workflows or coodinators to retrieve in one API call.
   ## oozie_jobs_count=100
 
+  # Use Cron format for defining the frequency of a Coordinator instead of the old frequency number/unit.
+  ## enable_cron_scheduling=true
+
 
 ###########################################################################
 # Settings to configure Beeswax with Hive
@@ -568,6 +739,15 @@
   # Set a LIMIT clause when browsing a partitioned table.
   # A positive value will be set as the LIMIT. If 0 or negative, do not set any limit.
   ## browse_partitioned_table_limit=250
+
+  # A limit to the number of rows that can be downloaded from a query.
+  # A value of -1 means there will be no limit.
+  # A maximum of 65,000 is applied to XLS downloads.
+  ## download_row_limit=1000000
+
+  # Hue will try to close the Hive query when the user leaves the editor page.
+  # This will free all the query resources in HiveServer2, but also make its results inaccessible.
+  ## close_queries=false
 
   [[ssl]]
     # SSL communication enabled for this server.
@@ -641,9 +821,21 @@
   # Turn on/off impersonation mechanism when talking to Impala
   ## impersonation_enabled=False
 
+  # Number of initial rows of a result set to ask Impala to cache in order
+  # to support re-fetching them for downloading them.
+  # Set to 0 for disabling the option and backward compatibility.
+  ## querycache_rows=50000
+
+  # Timeout in seconds for thrift calls
+  ## server_conn_timeout=120
+
+  # Hue will try to close the Impala query when the user leaves the editor page.
+  # This will free all the query resources in Impala, but also make its results inaccessible.
+  ## close_queries=true
+
 
 ###########################################################################
-# Settings to configure Hbase
+# Settings to configure HBase Browser
 ###########################################################################
 
 [hbase]
@@ -653,6 +845,11 @@
 
   # Hard limit of rows or columns per row fetched before truncating.
   ## truncate_limit = 500
+
+  # 'buffered' is the default of the HBase Thrift Server.
+  # 'framed' can be used to chunk up responses,
+  # which is useful when used in conjunction with the nonblocking server in Thrift.
+  ## thrift_transport=buffered
 
 
 ###########################################################################
@@ -669,6 +866,25 @@
 
   ## Query sent when no term is entered
   ## empty_query=*:*
+
+
+###########################################################################
+# Settings to configure Solr Indexer
+###########################################################################
+
+[indexer]
+
+  # Location of the solrctl binary.
+  ## solrctl_path=/usr/bin/solrctl
+
+  # Location of the solr home.
+  ## solr_home=/usr/lib/solr
+
+  # Zookeeper ensemble.
+  ## solr_zk_ensemble=localhost:2181/solr
+
+  # The contents of this directory will be copied over to the solrctl host to its temporary directory.
+  ## config_template_path=/../hue/desktop/libs/indexer/src/data/solr_configs
 
 
 ###########################################################################

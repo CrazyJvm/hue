@@ -21,6 +21,7 @@ import select
 import socket
 from django.utils.translation import ugettext as _
 from desktop import conf
+from desktop.lib.i18n import smart_str
 
 
 __all__ = ['CaseInsensitiveDict', 'create_synchronous_io_multiplexer']
@@ -95,3 +96,46 @@ def find_unused_port():
   _, port = sock.getsockname()
   sock.close()
   return port
+
+
+def force_list_to_strings(lst):
+  if not lst:
+    return lst
+
+  new_list = []
+  for item in lst:
+    if isinstance(item, basestring):
+      # Strings should not be unicode.
+      new_list.append(smart_str(item))
+    elif isinstance(item, dict):
+      # Recursively force dicts to strings.
+      new_list.append(force_dict_to_strings(item))
+    elif isinstance(item, list):
+      new_list.append(force_list_to_strings(item))
+    else:
+      # Normal objects, or other literals, should not be converted.
+      new_list.append(item)
+
+  return new_list
+
+
+def force_dict_to_strings(dictionary):
+  if not dictionary:
+    return dictionary
+
+  new_dict = {}
+  for k in dictionary:
+    new_key = smart_str(k)
+    if isinstance(dictionary[k], basestring):
+      # Strings should not be unicode.
+      new_dict[new_key] = smart_str(dictionary[k])
+    elif isinstance(dictionary[k], dict):
+      # Recursively force dicts to strings.
+      new_dict[new_key] = force_dict_to_strings(dictionary[k])
+    elif isinstance(dictionary[k], list):
+      new_dict[new_key] = force_list_to_strings(dictionary[k])
+    else:
+      # Normal objects, or other literals, should not be converted.
+      new_dict[new_key] = dictionary[k]
+
+  return new_dict

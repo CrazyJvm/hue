@@ -65,6 +65,8 @@ variables.
 # using it. So instead of breaking compatibility, we make a "pytype" alias.
 pytype = type
 
+from django.utils.encoding import smart_str
+
 from desktop.lib.paths import get_desktop_root, get_build_dir
 
 import configobj
@@ -77,6 +79,9 @@ import sys
 
 # Magical object for use as a "symbol"
 _ANONYMOUS = ("_ANONYMOUS")
+
+# Supported thrift transports
+SUPPORTED_THRIFT_TRANSPORTS = ('buffered', 'framed')
 
 # a BoundContainer(BoundConfig) object which has all of the application's configs as members
 GLOBAL_CONFIG = None
@@ -430,8 +435,7 @@ class ConfigSection(Config):
 
     # We sort the configuration for canonicalization.
     for programmer_key, config in sorted(self.members.iteritems(), key=lambda x: x[1].key):
-      config.print_help(out=out,
-                        indent=new_indent)
+      config.print_help(out=out, indent=new_indent)
 
 class UnspecifiedConfigSection(Config):
   """
@@ -600,6 +604,11 @@ def initialize(modules, config_dir):
 def is_anonymous(key):
   return key == _ANONYMOUS
 
+
+def coerce_str_lowercase(value):
+  return smart_str(value).lower()
+
+
 def coerce_bool(value):
   if isinstance(value, bool):
     return value
@@ -670,3 +679,16 @@ def validate_port(confvar):
   except ValueError:
     return error_res
   return [ ]
+
+def validate_thrift_transport(confvar):
+  """
+  Validate that the provided thrift transport is supported.
+  Returns [(confvar, error_msg)] or []
+  """
+  transport = confvar.get()
+  error_res = [(confvar, 'Thrift transport %s not supported. Please choose a supported transport: %s' % (transport, ', '.join(SUPPORTED_THRIFT_TRANSPORTS)))]
+
+  if transport not in SUPPORTED_THRIFT_TRANSPORTS:
+    return error_res
+
+  return []

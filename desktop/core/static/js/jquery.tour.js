@@ -157,19 +157,20 @@
             _removeTour = '<div style="color:red;float:right;margin:4px;cursor: pointer" onclick="javascript:$.jHueTour(\'remove_' + tour.name + '\')"><i class="fa fa-times-circle"></i></div>';
           }
 
-          var _link = '<a href="javascript:$.jHueTour(\'' + tour.name + '\', 1)" style="padding-left:0">';
+          var _link = '<a href="javascript:$.jHueTour(\'' + tour.name + '\', 1)" style="padding:2px">';
 
           if (typeof tour.video != "undefined" && tour.video != null && tour.video != ""){
             _extraIcon = '<i class="fa fa-youtube-play"></i> ';
           }
           else if (typeof tour.blog != "undefined" && tour.blog != null && tour.blog != ""){
             _extraIcon = '<i class="fa fa-external-link"></i> ';
-            _link = '<a href="' + tour.blog + '" target="_blank" style="padding:0">';
+            _link = '<a href="' + tour.blog + '" target="_blank" style="padding:2px">';
           }
           _toursHtml += '<li>' + _removeTour + _tourDone + _link + _extraIcon + tour.desc + '</a></li>';
           _added++;
         }
       });
+
       if (_added == 0) {
         if (_this.options.hideIfNoneAvailable){
           _questionMark.css("display", "none");
@@ -178,20 +179,7 @@
           _toursHtml += '<li>' + _this.options.labels.NO_AVAILABLE_TOURS + '</li>';
         }
       }
-      if (_added > 0 && typeof $.totalStorage !== "undefined" && ($.totalStorage("jHueTourHideModal") == null || $.totalStorage("jHueTourHideModal") == false)) {
-        $(document).ready(function () {
-          $("#jHueTourModal").modal();
-          $.totalStorage("jHueTourHideModal", true);
-          $("#jHueTourModalChk").attr("checked", "checked");
-          $("#jHueTourModalChk").on("change", function () {
-            $.totalStorage("jHueTourHideModal", $(this).is(":checked"));
-          });
-          $("#jHueTourModalClose").on("click", function () {
-            _questionMark.click();
-            $("#jHueTourModal").modal("hide");
-          });
-        });
-      }
+
       if (_this.options.showRemote){
         _toursHtml += '<li>' +
           ' <div class="input-append" style="margin-top: 10px">' +
@@ -206,23 +194,35 @@
     _questionMark.click(function () {
 
       var _closeBtn = $("<a>");
-      _closeBtn.html('<i class="fa fa-times"></i>').addClass("btn-mini").css("cursor", "pointer").css("margin-left", "7px").css("float", "right").css("margin-top", "-4px").css("margin-right", "-6px");
+      _closeBtn.html('<i class="fa fa-times"></i>').css("cursor", "pointer").css("padding", "5px").css("padding-left", "17px").css("padding-right", "7px").css("float", "right").css("margin-top", "-4px").css("margin-right", "-6px");
       _closeBtn.click(function () {
         $(".popover").remove();
+        $(document).off("keyup");
+        $(document).off("click");
       });
 
       _questionMark.popover("destroy").popover({
         title: _this.options.labels.AVAILABLE_TOURS,
         content: _toursHtml,
         html: true,
-        trigger: "manual",
-        placement: "left"
+        trigger: "click",
+        placement: "bottomRight"
       }).popover("show");
       if ($(".popover").position().top <= 0) {
         $(".popover").css("top", "10px");
       }
       _closeBtn.prependTo($(".popover-title"));
 
+      $(document).on("keyup", function (e) {
+        if (e.keyCode == 27) {
+          _closeBtn.click();
+        }
+      });
+      $(document).on("click", function (e) {
+        if ($(e.target).parents('.popover').length == 0 && !($(e.target).hasClass("fa-flag-checkered"))) {
+          _closeBtn.click();
+        }
+      });
     });
     _questionMark.appendTo($("#jHueTourFlagPlaceholder"));
   };

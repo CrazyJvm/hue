@@ -57,18 +57,7 @@ class Settings(models.Model):
 class DocumentTagManager(models.Manager):
 
   def get_tags(self, user):
-    # For now, the only shared tag is from 'sample' user and is named 'example'
-    # Tag permissions will come later.
-    # Share Tag from shared document will come later.
-    tags = self
-
-    try:
-      sample_user = auth_models.User.objects.get(username=SAMPLE_USERNAME)
-      tags = tags.filter(Q(owner=user) | Q(owner=sample_user, tag=DocumentTag.EXAMPLE))
-    except:
-      tags = tags.filter(owner=user)
-
-    return tags.distinct()
+    return self.filter(owner=user).distinct()
 
   def create_tag(self, owner, tag_name):
     if tag_name in DocumentTag.RESERVED:
@@ -77,21 +66,29 @@ class DocumentTagManager(models.Manager):
       tag, created = DocumentTag.objects.get_or_create(tag=tag_name, owner=owner)
       return tag
 
-  def get_default_tag(self, user):
-    tag, created = DocumentTag.objects.get_or_create(owner=user, tag=DocumentTag.DEFAULT)
+  def _get_tag(self, user, name):
+    try:
+      tag, created = DocumentTag.objects.get_or_create(owner=user, tag=name)
+    except DocumentTag.MultipleObjectsReturned, ex:
+      # We can delete duplicate tags of a user
+      dups = DocumentTag.objects.filter(owner=user, tag=name)
+      tag = dups[0]
+      for dup in dups[1:]:
+        LOG.warn('Deleting duplicate %s' % dup)
+        dup.delete()
     return tag
+
+  def get_default_tag(self, user):
+    return self._get_tag(user, DocumentTag.DEFAULT)
 
   def get_trash_tag(self, user):
-    tag, created = DocumentTag.objects.get_or_create(owner=user, tag=DocumentTag.TRASH)
-    return tag
+    return self._get_tag(user, DocumentTag.TRASH)
 
   def get_history_tag(self, user):
-    tag, created = DocumentTag.objects.get_or_create(owner=user, tag=DocumentTag.HISTORY)
-    return tag
+    return self._get_tag(user, DocumentTag.HISTORY)
 
   def get_example_tag(self, user):
-    tag, created = DocumentTag.objects.get_or_create(owner=user, tag=DocumentTag.EXAMPLE)
-    return tag
+    return self._get_tag(user, DocumentTag.EXAMPLE)
 
   def tag(self, owner, doc_id, tag_name='', tag_id=None):
     try:
@@ -99,7 +96,7 @@ class DocumentTagManager(models.Manager):
       if tag.tag in DocumentTag.RESERVED:
         raise Exception(_("Can't add %s: it is a reserved tag.") % tag)
     except DocumentTag.DoesNotExist:
-      tag = DocumentTag.objects.create(tag=tag_name, owner=owner)
+      tag = self._get_tag(user=owner, name=tag_name)
 
     doc = Document.objects.get_doc(doc_id, owner)
     doc.add_tag(tag)
@@ -112,6 +109,7 @@ class DocumentTagManager(models.Manager):
       raise Exception(_("Can't remove %s: it is a reserved tag.") % tag)
 
     doc = Document.objects.get_doc(doc_id, owner=owner)
+    doc.can_write_or_exception(owner)
     doc.remove_tag(tag)
 
   def delete_tag(self, tag_id, owner):
@@ -127,8 +125,8 @@ class DocumentTagManager(models.Manager):
       doc.add_tag(default_tag)
 
   def update_tags(self, owner, doc_id, tag_ids):
-    # TODO secu
     doc = Document.objects.get_doc(doc_id, owner)
+    doc.can_write_or_exception(owner)
 
     for tag in doc.tags.all():
       if tag.tag not in DocumentTag.RESERVED:
@@ -194,14 +192,21 @@ class DocumentManager(models.Manager):
 
     return [job.content_object for job in docs if job.content_object]
 
-  def available_docs(self, model_class, user):
-    trash = DocumentTag.objects.get_trash_tag(user=user)
-    history = DocumentTag.objects.get_history_tag(user=user)
+  def available_docs(self, model_class, user, with_history=False):
+    exclude = [DocumentTag.objects.get_trash_tag(user=user)]
+    if not with_history:
+      exclude.append(DocumentTag.objects.get_history_tag(user=user))
 
-    return Document.objects.get_docs(user, model_class).exclude(tags__in=[trash, history]).order_by('-last_modified')
+    return Document.objects.get_docs(user, model_class).exclude(tags__in=exclude).order_by('-last_modified')
 
-  def available(self, model_class, user):
-    docs = self.available_docs(model_class, user)
+  def history_docs(self, model_class, user):
+    include = [DocumentTag.objects.get_history_tag(user=user)]
+    exclude = [DocumentTag.objects.get_trash_tag(user=user)]
+
+    return Document.objects.get_docs(user, model_class).filter(tags__in=include).exclude(tags__in=exclude).order_by('-last_modified')
+
+  def available(self, model_class, user, with_history=False):
+    docs = self.available_docs(model_class, user, with_history)
 
     return [doc.content_object for doc in docs if doc.content_object]
 
@@ -326,7 +331,7 @@ class DocumentManager(models.Manager):
     # Delete documents with no object
     try:
       for doc in Document.objects.all():
-        if doc.content_type is None:
+        if doc.content_type is None or doc.content_object is None:
           doc.delete()
     except Exception, e:
       LOG.warn(force_unicode(e))
@@ -384,17 +389,15 @@ class Document(models.Model):
   def add_to_history(self):
     tag = DocumentTag.objects.get_history_tag(user=self.owner)
     self.tags.add(tag)
-    default_tag = DocumentTag.objects.get_default_tag(user=self.owner)
-    self.tags.remove(default_tag)
 
-  def share_to_default(self):
-    DocumentPermission.objects.share_to_default(self)
+  def share_to_default(self, name='read'):
+    DocumentPermission.objects.share_to_default(self, name=name)
 
   def can_read(self, user):
     return user.is_superuser or self.owner == user or Document.objects.get_docs(user).filter(id=self.id).exists()
 
   def can_write(self, user):
-    return user.is_superuser or self.owner == user
+    return user.is_superuser or self.owner == user or user in self.list_permissions('write').users.all()
 
   def can_read_or_exception(self, user, exception_class=PopupException):
     if self.can_read(user):
@@ -406,12 +409,10 @@ class Document(models.Model):
     if self.can_write(user):
       return True
     else:
-      raise exception_class(_('Only superusers and %s are allowed to modify this document.') % user)
+      raise exception_class(_('Only superusers and %s are allowed to write this document.') % user)
 
   def copy(self, name=None, owner=None):
     copy_doc = self
-
-    tags = self.tags.all()
 
     copy_doc.pk = None
     copy_doc.id = None
@@ -421,10 +422,9 @@ class Document(models.Model):
       copy_doc.owner = owner
     copy_doc.save()
 
-    tags = filter(lambda tag: tag.tag != DocumentTag.EXAMPLE, tags)
-    if not tags:
-      default_tag = DocumentTag.objects.get_default_tag(copy_doc.owner)
-      tags = [default_tag]
+    # Don't copy tags
+    default_tag = DocumentTag.objects.get_default_tag(copy_doc.owner)
+    tags = [default_tag]
     copy_doc.tags.add(*tags)
 
     return copy_doc
@@ -474,26 +474,40 @@ class Document(models.Model):
 
       if perm.get('group_ids'):
         groups = auth_models.Group.objects.in_bulk(perm.get('group_ids'))
+      else:
+        groups = []
 
       DocumentPermission.objects.sync(document=self, name=name, users=users, groups=groups)
 
-  def list_permissions(self):
-    return DocumentPermission.objects.list(document=self)
+  def list_permissions(self, perm='read'):
+    return DocumentPermission.objects.list(document=self, perm=perm)
 
 
 class DocumentPermissionManager(models.Manager):
 
-  def share_to_default(self, document):
+  def _check_perm(self, name):
+    perms = (DocumentPermission.READ_PERM, DocumentPermission.WRITE_PERM)
+    if name not in perms:
+      perms_string = ' and '.join(', '.join(perms).rsplit(', ', 1))
+      raise PopupException(_('Only %s permissions are supported, not %s.') % (perms_string, name))
+
+
+  def share_to_default(self, document, name='read'):
     from useradmin.models import get_default_user_group # Remove build dependency
-    perm, created = DocumentPermission.objects.get_or_create(doc=document)
+    
+    self._check_perm(name)
+
+    if name == DocumentPermission.WRITE_PERM:
+      perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=DocumentPermission.WRITE_PERM)
+    else:
+      perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=DocumentPermission.READ_PERM)
     default_group = get_default_user_group()
 
     if default_group:
       perm.groups.add(default_group)
 
   def update(self, document, name='read', users=None, groups=None, add=True):
-    if name != DocumentPermission.READ_PERM:
-      raise PopupException(_('Only %s permissions is supported, not %s.') % (DocumentPermission.READ_PERM, name))
+    self._check_perm(name)
 
     perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=name)
 
@@ -513,8 +527,7 @@ class DocumentPermissionManager(models.Manager):
       perm.delete()
 
   def sync(self, document, name='read', users=None, groups=None):
-    if name != DocumentPermission.READ_PERM:
-      raise PopupException(_('Only %s permissions is supported, not %s.') % (DocumentPermission.READ_PERM, name))
+    self._check_perm(name)
 
     perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=name)
 
@@ -531,23 +544,35 @@ class DocumentPermissionManager(models.Manager):
     if not users and not groups:
       perm.delete()
 
-  def list(self, document):
-    perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=DocumentPermission.READ_PERM)
+  def list(self, document, perm='read'):
+    try:
+      perm, created = DocumentPermission.objects.get_or_create(doc=document, perms=perm)
+    except DocumentPermission.MultipleObjectsReturned:
+      # We can delete duplicate perms of a document
+      dups = DocumentPermission.objects.filter(doc=document, perms=perm)
+      perm = dups[0]
+      for dup in dups[1:]:
+        LOG.warn('Deleting duplicate %s' % dup)
+        dup.delete()
     return perm
 
 
 class DocumentPermission(models.Model):
   READ_PERM = 'read'
+  WRITE_PERM = 'write'
 
   doc = models.ForeignKey(Document)
 
   users = models.ManyToManyField(auth_models.User, db_index=True)
   groups = models.ManyToManyField(auth_models.Group, db_index=True)
-  perms = models.TextField(default=READ_PERM, choices=((READ_PERM, 'read'),))
+  perms = models.TextField(default=READ_PERM, choices=( # one perm
+    (READ_PERM, 'read'),
+    (WRITE_PERM, 'write'),
+  ))
 
 
   objects = DocumentPermissionManager()
-  #unique_together = ('doc', 'perms')
+  unique_together = ('doc', 'perms')
 
 
 # HistoryTable

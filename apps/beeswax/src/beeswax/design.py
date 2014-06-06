@@ -37,7 +37,7 @@ LOG = logging.getLogger(__name__)
 SERIALIZATION_VERSION = '0.4.1'
 
 
-def hql_query(hql, database='default'):
+def hql_query(hql, database='default', query_type=None):
   data_dict = json.loads('{"query": {"email_notify": false, "query": null, "type": 0, "is_parameterized": true, "database": "default"}, '
                                '"functions": [], "VERSION": "0.4.1", "file_resources": [], "settings": []}')
   if not (isinstance(hql, str) or isinstance(hql, unicode)):
@@ -45,6 +45,8 @@ def hql_query(hql, database='default'):
 
   data_dict['query']['query'] = strip_trailing_semicolon(hql)
   data_dict['query']['database'] = database
+  if query_type:
+    data_dict['query']['type'] = query_type
   hql_design = HQLdesign()
   hql_design._data_dict = data_dict
 
@@ -86,6 +88,10 @@ class HQLdesign(object):
   @property
   def hql_query(self):
     return self._data_dict['query']['query']
+
+  @hql_query.setter
+  def hql_query(self, query):
+    self._data_dict['query']['query'] = query
 
   @property
   def query(self):
@@ -183,12 +189,11 @@ def split_statements(hql):
   """
   statements = []
   current = ''
-  prev = ''
   between_quotes = None
 
   for c in hql:
     current += c
-    if c in ('"', "'") and prev != '\\':
+    if c in ('"', "'"):
       if between_quotes == c:
         between_quotes = None
       elif between_quotes is None:
@@ -197,7 +202,6 @@ def split_statements(hql):
       if between_quotes is None:
         statements.append(current)
         current = ''
-    prev = c
 
   if current and current != ';':
     statements.append(current)

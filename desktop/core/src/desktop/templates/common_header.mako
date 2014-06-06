@@ -13,6 +13,7 @@
 ## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ## See the License for the specific language governing permissions and
 ## limitations under the License.
+
 <%!
 from desktop import conf
 import urllib
@@ -57,6 +58,7 @@ from django.utils.translation import ugettext as _
     % if conf.CUSTOM.BANNER_TOP_HTML.get():
       body {
         display: none;
+        visibility: hidden;
         padding-top: ${str(int(padding[:-2]) + 30) + 'px'};
       }
       .banner {
@@ -77,6 +79,7 @@ from django.utils.translation import ugettext as _
     % else:
       body {
         display: none;
+        visibility: hidden;
         padding-top: ${padding};
       }
     % endif
@@ -117,12 +120,28 @@ from django.utils.translation import ugettext as _
 
   </script>
 
+  <!--[if lt IE 9]>
+  <script type="text/javascript">
+    location.href = "${ url('desktop.views.unsupported') }";
+  </script>
+  <![endif]-->
+
+  <script type="text/javascript">
+    // check if it's a Firefox < 7
+    var _UA = navigator.userAgent.toLowerCase();
+    for (var i = 1; i < 7; i++) {
+      if (_UA.indexOf("firefox/" + i + ".") > -1) {
+        location.href = "${ url('desktop.views.unsupported') }";
+      }
+    }
+  </script>
+
   <script src="/static/js/hue.utils.js"></script>
-  <script src="/static/ext/js/jquery/jquery-2.0.2.min.js"></script>
+  <script src="/static/ext/js/jquery/jquery-2.1.1.min.js"></script>
   <script src="/static/js/jquery.migration.js"></script>
   <script src="/static/js/jquery.filechooser.js"></script>
   <script src="/static/js/jquery.selector.js"></script>
-  <script src="/static/js/jquery.alert.js"></script>
+  <script src="/static/js/jquery.delayedinput.js"></script>
   <script src="/static/js/jquery.rowselector.js"></script>
   <script src="/static/js/jquery.notify.js"></script>
   <script src="/static/js/jquery.titleupdater.js"></script>
@@ -137,12 +156,21 @@ from django.utils.translation import ugettext as _
   <script src="/static/js/jquery.datatables.sorting.js"></script>
   <script src="/static/ext/js/bootstrap.min.js"></script>
   <script src="/static/ext/js/fileuploader.js"></script>
+  <script src="/static/js/popover-extra-placements.js"></script>
 
   <script type="text/javascript" charset="utf-8">
     $(document).ready(function () {
+      // forces IE's ajax calls not to cache
+      if ($.browser.msie) {
+        $.ajaxSetup({ cache: false });
+      }
+
       // prevents framebusting and clickjacking
       if (self == top){
-        $("body").show();
+        $("body").css({
+          'display': 'block',
+          'visibility': 'visible'
+        });
       }
       else {
         top.location = self.location;
@@ -177,7 +205,7 @@ from django.utils.translation import ugettext as _
       window.setTimeout(checkJobBrowserStatus, 10);
 
       function checkJobBrowserStatus(){
-        $.getJSON("/${apps['jobbrowser'].display_name}/?format=json&state=running&user=${user.username}&rnd="+Math.random(), function(data){
+        $.getJSON("/${apps['jobbrowser'].display_name}/?format=json&state=running&user=${user.username}", function(data){
           if (data != null){
             if (data.length > 0){
               $("#jobBrowserCount").removeClass("hide").text(data.length);
@@ -244,7 +272,7 @@ from django.utils.translation import ugettext as _
 
 % if conf.CUSTOM.BANNER_TOP_HTML.get():
   <div id="banner-top" class="banner">
-    ${ conf.CUSTOM.BANNER_TOP_HTML.get() }
+    ${ conf.CUSTOM.BANNER_TOP_HTML.get() | n,unicode }
   </div>
 % endif
 
@@ -261,17 +289,18 @@ from django.utils.translation import ugettext as _
 
 <div class="navigator">
   <div class="pull-right">
-  % if user.is_authenticated():
+
+  % if user.is_authenticated() and section != 'login':
   <ul class="nav nav-pills">
     <li class="divider-vertical"></li>
     % if 'filebrowser' in apps:
-    <li><a title="${_('Manage HDFS')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}"><i class="fa fa-file"></i>&nbsp;${_('File Browser')}&nbsp;</a></li>
+    <li><a title="${_('Manage HDFS')}" rel="navigator-tooltip" href="/${apps['filebrowser'].display_name}"><i class="fa fa-file"></i><span class="hideable">&nbsp;${_('File Browser')}&nbsp;</span></a></li>
     % endif
     % if 'jobbrowser' in apps:
-    <li><a title="${_('Manage jobs')}" rel="navigator-tooltip" href="/${apps['jobbrowser'].display_name}"><i class="fa fa-list-alt"></i>&nbsp;${_('Job Browser')}&nbsp;<span id="jobBrowserCount" class="badge badge-warning hide" style="padding-top:0;padding-bottom: 0"></span></a></li>
+    <li><a title="${_('Manage jobs')}" rel="navigator-tooltip" href="/${apps['jobbrowser'].display_name}"><i class="fa fa-list-alt"></i><span class="hideable">&nbsp;${_('Job Browser')}&nbsp;</span><span id="jobBrowserCount" class="badge badge-warning hide" style="padding-top:0;padding-bottom: 0"></span></a></li>
     % endif
     <li class="dropdown">
-      <a title="${ _('Administration') }" rel="navigator-tooltip" href="index.html#" data-toggle="dropdown" class="dropdown-toggle"><i class="fa fa-cogs"></i>&nbsp;&nbsp;${user.username}<b class="caret"></b></a>
+      <a title="${ _('Administration') }" rel="navigator-tooltip" href="index.html#" data-toggle="dropdown" class="dropdown-toggle"><i class="fa fa-cogs"></i>&nbsp;<span class="hideable">${user.username}&nbsp;</span><b class="caret"></b></a>
       <ul class="dropdown-menu">
         <li><a href="${ url('useradmin.views.edit_user', username=urllib.quote(user.username)) }"><i class="fa fa-key"></i>&nbsp;&nbsp;${_('Edit Profile')}</a></li>
         %if user.is_superuser:
@@ -279,15 +308,23 @@ from django.utils.translation import ugettext as _
         %endif
       </ul>
     </li>
+    % if 'help' in apps:
     <li><a title="${_('Documentation')}" rel="navigator-tooltip" href="/help"><i class="fa fa-question-circle"></i></a></li>
+    % endif
     <li id="jHueTourFlagPlaceholder"></li>
     <li><a title="${_('Sign out')}" rel="navigator-tooltip" href="/accounts/logout/"><i class="fa fa-sign-out"></i></a></li>
   </ul>
-      % endif
+  % else:
+  <ul class="nav nav-pills" style="margin-right: 40px">
+    <li id="jHueTourFlagPlaceholder"></li>
+  </ul>
+  % endif
+
   </div>
     <a class="brand nav-tooltip pull-left" title="${_('About Hue')}" rel="navigator-tooltip" href="/about"><img src="/static/art/hue-logo-mini-white.png" data-orig="/static/art/hue-logo-mini-white.png" data-hover="/static/art/hue-logo-mini-white-hover.png"/></a>
+    % if user.is_authenticated() and section != 'login':
      <ul class="nav nav-pills pull-left">
-       <li><a title="${_('My documents')}" rel="navigator-tooltip" href="${ url('desktop.views.home') }" style="padding-bottom:2px!important"><i class="fa fa-home" style="font-size: 19px"></i></a></li>
+       <li><a title="${_('My documents')}" rel="navigator-tooltip" href="${ url('desktop.views.home') }" style="padding-bottom:2px!important"><i class="fa fa-home" style="font-size: 19px"></i></a></li>        
        <%
          query_apps = count_apps(apps, ['beeswax', 'impala', 'rdbms', 'pig', 'jobsub', 'spark']);
        %>
@@ -352,9 +389,26 @@ from django.utils.translation import ugettext as _
        </li>
        % endif
        % if 'search' in apps:
-       <li>
-         <a title="${_('Solr Search')}" rel="navigator-tooltip" href="${ url('search:index') }">${_('Search')}</a>
-       </li>
+         <%! from search.search_controller import SearchController %>
+         <% collections = SearchController(user).get_search_collections() %>
+         % if not collections:
+           <li>
+             <a title="${_('Solr Search')}" rel="navigator-tooltip" href="${ url('search:index') }">Search</a>
+           </li>
+         % else:
+           <li class="dropdown">
+             <a title="${_('Solr Search')}" rel="navigator-tooltip" href="#" data-toggle="dropdown" class="dropdown-toggle">${_('Search')} <b class="caret"></b></a>
+             <ul role="menu" class="dropdown-menu">
+               % for collection in collections:
+               <li><a href="${ url('search:index') }?collection=${ collection.id }"><img src="${ collection.icon }"/> ${ collection.label }</a></li>
+               % endfor
+               % if user.is_superuser:
+                 <li class="divider"></li>
+                 <li><a href="${ url('indexer:collections') }"><i class="fa fa-database"></i> ${ _('Indexes') }</a></li>
+               % endif
+             </ul>
+           </li>
+         % endif
        % endif
        % if other_apps:
        <li class="dropdown">
@@ -367,8 +421,29 @@ from django.utils.translation import ugettext as _
        </li>
        % endif
      </ul>
+   % endif
 
 </div>
+
+% if is_demo:
+  <ul class="side-labels unstyled">
+    <li class="feedback"><a href="javascript:showClassicWidget()"><i class="fa fa-envelope-o"></i> ${_('Feedback')}</a></li>
+  </ul>
+
+  <!-- UserVoice JavaScript SDK -->
+  <script>(function(){var uv=document.createElement('script');uv.type='text/javascript';uv.async=true;uv.src='//widget.uservoice.com/8YpsDfIl1Y2sNdONoLXhrg.js';var s=document.getElementsByTagName('script')[0];s.parentNode.insertBefore(uv,s)})()</script>
+  <script>
+  UserVoice = window.UserVoice || [];
+  function showClassicWidget() {
+    UserVoice.push(['showLightbox', 'classic_widget', {
+      mode: 'feedback',
+      primary_color: '#338cb8',
+      link_color: '#338cb8',
+      forum_id: 247008
+    }]);
+  }
+  </script>
+% endif
 
 <div id="jHueNotify" class="alert hide">
     <button class="close">&times;</button>

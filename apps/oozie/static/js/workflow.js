@@ -20,6 +20,17 @@ var Modal = ModalModule($, ko);
 
 var Node = NodeModule($, IdGeneratorTable, NodeFields);
 
+var SubworkflowNode = NodeModule($, IdGeneratorTable, NodeFields);
+$.extend(SubworkflowNode.prototype, Node.prototype, {
+  'initialize': function(workflow, model, registry) {
+    var self = this;
+
+    if (self.sub_workflow()) {
+      self.sub_workflow(self.sub_workflow().toString());
+    }
+  }
+});
+
 var StartNode = NodeModule($, IdGeneratorTable, NodeFields);
 $.extend(StartNode.prototype, Node.prototype, {
   /**
@@ -120,7 +131,10 @@ $.extend(ForkNode.prototype, Node.prototype, {
     }
 
     var links = self.links().filter(function(element, index, arr) {
-      return self.registry.get(element.child()).node_type() != 'join';
+      var node = self.registry.get(element.child());
+      // If no node is found, it means that it's a temporary node that may be added to the graph.
+      // This will not be a join. It will most likely be a decision node.
+      return !node || node.node_type() != 'join';
     });
 
     if (links.length < 2) {
@@ -171,7 +185,7 @@ $.extend(ForkNode.prototype, Node.prototype, {
       description: self.description(),
       node_type: 'decision',
       workflow: self.workflow(),
-      child_links: self.model.child_links
+      child_links: ko.mapping.toJS(self.child_links())
     });
     var default_link = {
       parent: decision_model.id,
@@ -494,6 +508,9 @@ var WorkflowModule = function($, NodeModelChooser, Node, ForkNode, DecisionNode,
               case 'kill':
                 temp = self.kill = new Node(self, model, self.registry);
               break;
+              case 'subworkflow':
+                temp = new SubworkflowNode(self, model, self.registry);
+              break;
               default:
                 temp = new Node(self, model, self.registry);
               break;
@@ -682,7 +699,7 @@ var WorkflowModule = function($, NodeModelChooser, Node, ForkNode, DecisionNode,
       var self = this;
       self.job_properties.remove(data);
     },
-    
+
     // Workflow UI
     // Function to build nodes... recursively.
     build: function() {
@@ -821,7 +838,7 @@ var WorkflowModule = function($, NodeModelChooser, Node, ForkNode, DecisionNode,
             zIndex: 1000,
             opacity: 0.45,
             revertDuration: 0,
-            cancel: '.node-action-bar'
+            cancel: '.edit-node-link'
           });
         }
       });

@@ -23,6 +23,7 @@ import time
 from django.utils.translation import ugettext as _
 
 from desktop.lib.exceptions_renderable import PopupException
+from desktop.lib.i18n import smart_str
 from hadoop import cluster
 from hadoop.fs.hadoopfs import Hdfs
 
@@ -75,6 +76,7 @@ class Submission(object):
     jobtracker = cluster.get_cluster_addr_for_job_submission()
 
     if deployment_dir is None:
+      self._update_properties(jobtracker) # Needed as we need to set some properties like Credentials before
       deployment_dir = self.deploy()
 
     self._update_properties(jobtracker, deployment_dir)
@@ -153,6 +155,7 @@ class Submission(object):
 
     return deployment_dir
 
+
   def get_external_parameters(self, application_path):
     """From XML and job.properties HDFS files"""
     deployment_dir = os.path.dirname(application_path)
@@ -168,14 +171,14 @@ class Submission(object):
 
   def _get_external_parameters(self, xml, properties=None):
     from oozie.models import DATASET_FREQUENCY
-    parameters = dict([(var, '') for var in find_variables(xml) if not self._is_coordinator() or var not in DATASET_FREQUENCY])
+    parameters = dict([(var, '') for var in find_variables(xml, include_named=False) if not self._is_coordinator() or var not in DATASET_FREQUENCY])
 
     if properties:
       parameters.update(dict([line.strip().split('=')
                               for line in properties.split('\n') if not line.startswith('#') and len(line.strip().split('=')) == 2]))
     return parameters
 
-  def _update_properties(self, jobtracker_addr, deployment_dir):
+  def _update_properties(self, jobtracker_addr, deployment_dir=None):
     LOG.info('Using FS %s and JT %s' % (self.fs, self.jt))
     if self.jt and self.jt.logical_name:
       jobtracker_addr = self.jt.logical_name
@@ -190,7 +193,7 @@ class Submission(object):
       'nameNode': fs_defaultfs,
     })
 
-    if self.job:
+    if self.job and deployment_dir:
       self.properties.update({
         self.job.get_application_path_key(): self.fs.get_hdfs_path(deployment_dir),
         self.job.HUE_ID: self.job.id
@@ -240,9 +243,9 @@ class Submission(object):
         raise IOError(ex.errno, msg)
 
     if not self.fs.exists(path):
-      self._do_as(self.user.username , self.fs.mkdir, path, perms)
+      self._do_as(self.user.username, self.fs.mkdir, path, perms)
 
-    self._do_as(self.user.username , self.fs.chmod, path, perms)
+    self._do_as(self.user.username, self.fs.chmod, path, perms)
 
     return path
 
@@ -252,7 +255,7 @@ class Submission(object):
     This should run as the workflow user.
     """
     xml_path = self.fs.join(deployment_dir, self.job.get_application_filename())
-    self.fs.create(xml_path, overwrite=True, permission=0644, data=oozie_xml)
+    self.fs.create(xml_path, overwrite=True, permission=0644, data=smart_str(oozie_xml))
     LOG.debug("Created %s" % (xml_path,))
 
     # List jar files

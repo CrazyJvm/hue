@@ -20,6 +20,7 @@ import logging
 import json
 import mimetypes
 import operator
+import parquet
 import posixpath
 import re
 import shutil
@@ -80,6 +81,14 @@ INLINE_DISPLAY_MIMETYPE = re.compile('video/|image/|audio/|application/pdf|appli
                                      'application/vnd\.openxmlformats')
 
 logger = logging.getLogger(__name__)
+
+
+class ParquetOptions(object):
+    def __init__(self, col=None, format='json', no_headers=True, limit=-1):
+        self.col = col
+        self.format = format
+        self.no_headers = no_headers
+        self.limit = limit
 
 
 def index(request):
@@ -612,23 +621,21 @@ def read_contents(codec_type, path, fs, offset, length):
         fhandle = fs.open(path)
         stats = fs.stats(path)
 
-        # Auto codec detection for [gzip, avro, snappy, snappy avro, none]
-        if codec_type == 'avro' and snappy_installed() and detect_snappy(fhandle.read()):
-            codec_type = 'snappy_avro'
-        elif not codec_type:
+        # Auto codec detection for [gzip, avro, snappy, none]
+        if not codec_type:
             contents = fhandle.read(3)
+            fhandle.seek(0)
             codec_type = 'none'
             if path.endswith('.gz') and detect_gzip(contents):
                 codec_type = 'gzip'
                 offset = 0
-            elif path.endswith('.avro'):
-                if detect_avro(contents):
-                    codec_type = 'avro'
-                if snappy_installed() and stats.size <= MAX_SNAPPY_DECOMPRESSION_SIZE.get() and detect_snappy(contents + fhandle.read()):
-                    codec_type = 'snappy_avro'
+            elif path.endswith('.avro') and detect_avro(contents):
+                codec_type = 'avro'
+            elif path.endswith('.parquet') and detect_parquet(fhandle):
+                codec_type = 'parquet'
             elif snappy_installed() and path.endswith('.snappy'):
                 codec_type = 'snappy'
-            elif snappy_installed() and stats.size <= MAX_SNAPPY_DECOMPRESSION_SIZE.get() and detect_snappy(contents + fhandle.read()):
+            elif snappy_installed() and stats.size <= MAX_SNAPPY_DECOMPRESSION_SIZE.get() and detect_snappy(fhandle.read()):
                 codec_type = 'snappy'
 
         fhandle.seek(0)
@@ -637,8 +644,8 @@ def read_contents(codec_type, path, fs, offset, length):
             contents = _read_gzip(fhandle, path, offset, length, stats)
         elif codec_type == 'avro':
             contents = _read_avro(fhandle, path, offset, length, stats)
-        elif codec_type == 'snappy_avro':
-            contents = _read_snappy_avro(fhandle, path, offset, length, stats)
+        elif codec_type == 'parquet':
+            contents = _read_parquet(fhandle, path, offset, length, stats)
         elif codec_type == 'snappy':
             contents = _read_snappy(fhandle, path, offset, length, stats)
         else:
@@ -669,16 +676,6 @@ def _read_snappy(fhandle, path, offset, length, stats):
     return _read_simple(StringIO(_decompress_snappy(fhandle.read())), path, offset, length, stats)
 
 
-def _read_snappy_avro(fhandle, path, offset, length, stats):
-    if not snappy_installed():
-        raise PopupException(_('Failed to decompress snappy compressed file. Snappy is not installed.'))
-
-    if stats.size > MAX_SNAPPY_DECOMPRESSION_SIZE.get():
-        raise PopupException(_('Failed to decompress snappy compressed file. File size is greater than allowed max snappy decompression size of %d.') % MAX_SNAPPY_DECOMPRESSION_SIZE.get())
-
-    return _read_avro(StringIO(_decompress_snappy(fhandle.read())), path, offset, length, stats)
-
-
 def _read_avro(fhandle, path, offset, length, stats):
     contents = ''
     try:
@@ -700,6 +697,17 @@ def _read_avro(fhandle, path, offset, length, stats):
         logging.warn("Could not read avro file at %s" % path, exc_info=True)
         raise PopupException(_("Failed to read Avro file."))
     return contents
+
+
+def _read_parquet(fhandle, path, offset, length, stats):
+    try:
+        dumped_data = StringIO()
+        parquet._dump(fhandle, ParquetOptions(), out=dumped_data)
+        dumped_data.seek(offset)
+        return dumped_data.read()
+    except:
+        logging.warn("Could not read parquet file at %s" % path, exc_info=True)
+        raise PopupException(_("Failed to read Parquet file."))
 
 
 def _read_gzip(fhandle, path, offset, length, stats):
@@ -747,6 +755,13 @@ def detect_snappy(contents):
         return snappy.isValidCompressed(contents)
     except:
         return False
+
+
+def detect_parquet(fhandle):
+    """
+    Detect parquet from magic header bytes.
+    """
+    return parquet._check_header_magic_bytes(fhandle)
 
 
 def snappy_installed():
@@ -1195,18 +1210,26 @@ def _upload_archive(request):
         dest = request.fs.join(form.cleaned_data['dest'], uploaded_file.name)
         try:
             # Extract if necessary
-            # Make sure dest path is without '.zip' extension
+            # Make sure dest path is without the extension
             if dest.endswith('.zip'):
-                temp_path = archive_factory(uploaded_file).extract()
+                temp_path = archive_factory(uploaded_file, 'zip').extract()
                 if not temp_path:
                     raise PopupException(_('Could not extract contents of file.'))
                 # Move the file to where it belongs
                 dest = dest[:-4]
-                request.fs.copyFromLocal(temp_path, dest)
-                shutil.rmtree(temp_path)
-                response['status'] = 0
+            elif dest.endswith('.tar.gz'):
+                print uploaded_file
+                temp_path = archive_factory(uploaded_file, 'tgz').extract()
+                if not temp_path:
+                    raise PopupException(_('Could not extract contents of file.'))
+                # Move the file to where it belongs
+                dest = dest[:-7]
             else:
                 raise PopupException(_('Could not interpret archive type.'))
+
+            request.fs.copyFromLocal(temp_path, dest)
+            shutil.rmtree(temp_path)
+            response['status'] = 0
 
         except IOError, ex:
             already_exists = False

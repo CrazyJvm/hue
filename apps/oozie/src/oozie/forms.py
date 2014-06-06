@@ -19,25 +19,27 @@ import logging
 from datetime import datetime,  timedelta
 
 from django import forms
-from django.db.models import Q
 from django.core.exceptions import ValidationError
 from django.forms.widgets import TextInput
 from django.utils.functional import curry
 from django.utils.translation import ugettext_lazy as _t
 
 from desktop.lib.django_forms import MultiForm, SplitDateTimeWidget
+from desktop.models import Document
+
+from oozie.conf import ENABLE_CRON_SCHEDULING
 from oozie.models import Workflow, Node, Java, Mapreduce, Streaming, Coordinator,\
   Dataset, DataInput, DataOutput, Pig, Link, Hive, Sqoop, Ssh, Shell, DistCp, Fs,\
   Email, SubWorkflow, Generic, Bundle, BundledCoordinator
-from desktop.models import Document
+
 
 
 LOG = logging.getLogger(__name__)
 
 
 class ParameterForm(forms.Form):
-  name = forms.CharField(max_length=40, widget=forms.widgets.HiddenInput())
-  value = forms.CharField(max_length=1024, required=False)
+  name = forms.CharField(max_length=1024, widget=forms.widgets.HiddenInput())
+  value = forms.CharField(max_length=4096, required=False)
 
   NON_PARAMETERS = (
       'user.name',
@@ -275,7 +277,7 @@ class SubWorkflowForm(forms.ModelForm):
     workflow = kwargs.pop('workflow')
     super(SubWorkflowForm, self).__init__(*args, **kwargs)
     choices=((wf.id, wf) for wf in Document.objects.available(Workflow, user) if workflow.id != id)
-    self.fields['sub_workflow'] = forms.ChoiceField(choices=choices, widget=forms.RadioSelect(attrs={'class':'radio'}))
+    self.fields['sub_workflow'] = forms.ChoiceField(choices=choices, required=False, widget=forms.RadioSelect(attrs={'class':'radio'}))
 
   class Meta:
     model = SubWorkflow
@@ -287,8 +289,9 @@ class SubWorkflowForm(forms.ModelForm):
   def clean_sub_workflow(self):
     try:
       return Workflow.objects.get(id=int(self.cleaned_data.get('sub_workflow')))
-    except Exception, e:
-      raise ValidationError(_('The sub-workflow could not be found: %s.' % e))
+    except:
+      LOG.debug('The sub-workflow could not be found.', exc_info=True)
+      return None
 
 
 class GenericForm(forms.ModelForm):
@@ -339,6 +342,8 @@ class CoordinatorForm(forms.ModelForm):
   class Meta:
     model = Coordinator
     exclude = ('owner', 'deployment_dir')
+    if ENABLE_CRON_SCHEDULING.get():
+        exclude += ('frequency_number', 'frequency_unit')
     widgets = {
       'description': forms.TextInput(attrs={'class': 'span5'}),
       'parameters': forms.widgets.HiddenInput(),
